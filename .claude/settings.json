@@ -1,0 +1,8 @@
+{
+  "disableClaudeAiConnectors": true,
+  "enabledPlugins": {
+    "context7@claude-plugins-official": false,
+    "playwright@claude-plugins-official": false,
+    "linear@claude-plugins-official": false
+  }
+}
