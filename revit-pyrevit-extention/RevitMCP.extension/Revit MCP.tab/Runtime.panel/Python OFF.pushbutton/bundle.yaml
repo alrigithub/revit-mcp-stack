@@ -1,0 +1,5 @@
+title: Python OFF
+tooltip: Disable Python admission and terminally cancel queued-not-started Python requests.
+author: Local
+engine:
+  persistent: true

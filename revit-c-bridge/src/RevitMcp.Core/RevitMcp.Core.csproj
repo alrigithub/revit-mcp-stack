@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../RevitMcp.Contracts/RevitMcp.Contracts.csproj" />
+  </ItemGroup>
+</Project>

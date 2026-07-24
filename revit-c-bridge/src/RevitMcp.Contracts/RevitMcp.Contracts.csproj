@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>RevitMcp.Contracts</AssemblyName>
+    <RootNamespace>RevitMcp.Contracts</RootNamespace>
+  </PropertyGroup>
+</Project>

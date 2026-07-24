@@ -1,0 +1,22 @@
+[
+  {"id":"focused_idle","automated_baseline":true,"verified":false},
+  {"id":"unfocused","automated_baseline":false,"verified":false},
+  {"id":"busy","automated_baseline":false,"verified":false},
+  {"id":"modal","automated_baseline":false,"verified":false},
+  {"id":"failure_dialog","automated_baseline":false,"verified":false},
+  {"id":"document_switch_close","automated_baseline":false,"verified":false},
+  {"id":"clean_shutdown","automated_baseline":false,"verified":false},
+  {"id":"crash_kill_recovery","automated_baseline":false,"verified":false},
+  {"id":"focus_nudge_disabled","automated_baseline":false,"verified":false},
+  {"id":"focus_nudge_enabled_experiment","automated_baseline":false,"verified":false},
+  {"id":"two_clients","automated_baseline":false,"verified":false},
+  {"id":"unrelated_routes_traffic","automated_baseline":false,"verified":false},
+  {"id":"100_modal_deadline_writes","automated_baseline":false,"verified":false},
+  {"id":"duplicate_ids_response_loss","automated_baseline":false,"verified":false},
+  {"id":"handler_exit_enqueue_stress","automated_baseline":false,"verified":false},
+  {"id":"reload_queued_running","automated_baseline":false,"verified":false},
+  {"id":"1000_python_csharp_memory","automated_baseline":false,"verified":false},
+  {"id":"edr_actual_stack","automated_baseline":false,"verified":false},
+  {"id":"pyrevit_6_4_coinstall_2025_2026_2027","automated_baseline":false,"verified":false},
+  {"id":"failed_write_rollback_one_undo_no_expired_mutation","automated_baseline":false,"verified":false}
+]

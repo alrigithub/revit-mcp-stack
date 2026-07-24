@@ -1,0 +1,9 @@
+{
+  "name": "RevitMCP",
+  "description": "Persistent IronPython execution provider for the direct Revit MCP bridge.",
+  "author": "Local",
+  "author_profile": "",
+  "url": "",
+  "builtin": false,
+  "rocket_mode_compatible": true
+}

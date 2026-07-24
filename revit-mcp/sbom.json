@@ -1,0 +1,11 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {"component": {"type": "application", "name": "revit-mcp-local", "version": "0.9.0"}},
+  "components": [
+    {"type": "library", "name": "mcp", "version": "1.10.1", "supplier": {"name": "Model Context Protocol project"}, "properties": [{"name": "reason", "value": "Official Python SDK; newest release without forbidden pywin32 dependency."}]},
+    {"type": "library", "name": "CPython", "version": "3.12", "properties": [{"name": "reason", "value": "Frozen stdio MCP runtime."}]}
+  ],
+  "properties": [{"name": "full-lock", "value": "requirements.lock"}, {"name": "telemetry", "value": "none"}]
+}

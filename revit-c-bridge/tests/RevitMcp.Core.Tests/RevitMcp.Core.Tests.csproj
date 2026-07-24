@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/RevitMcp.Core/RevitMcp.Core.csproj" />
+    <ProjectReference Include="../../src/RevitMcp.Contracts/RevitMcp.Contracts.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>RevitMcp.Bridge</AssemblyName>
+    <RootNamespace>RevitMcp.Bridge</RootNamespace>
+    <UseWPF>true</UseWPF>
+    <RevitApiPackageVersion Condition="'$(RevitYear)' == '2025'">2025.4.50</RevitApiPackageVersion>
+    <RevitApiPackageVersion Condition="'$(RevitYear)' == '2026'">2026.4.10</RevitApiPackageVersion>
+    <RevitApiPackageVersion Condition="'$(RevitYear)' == '2027'">2027.1.0</RevitApiPackageVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../RevitMcp.Contracts/RevitMcp.Contracts.csproj" />
+    <ProjectReference Include="../RevitMcp.Core/RevitMcp.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseInstalledRevitApi)' != 'true'">
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="$(RevitApiPackageVersion)" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitApiPackageVersion)" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseInstalledRevitApi)' == 'true'">
+    <Reference Include="RevitAPI" HintPath="$(RevitApiDir)\RevitAPI.dll" Private="false" />
+    <Reference Include="RevitAPIUI" HintPath="$(RevitApiDir)\RevitAPIUI.dll" Private="false" />
+  </ItemGroup>
+</Project>

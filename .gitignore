@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/artifacts/
+**/dist/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/validation/results/*
+!**/validation/results/.gitkeep
+*.user
+*.suo
+*.pfx
+*.cer

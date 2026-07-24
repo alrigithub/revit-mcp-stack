@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<RevitAddIns><AddIn Type="Application"><Name>Revit MCP Bridge</Name><Assembly>{{ASSEMBLY}}</Assembly><AddInId>36A463A3-E63F-4B14-90E6-7C34303B25B1</AddInId><FullClassName>RevitMcp.Bridge.App</FullClassName><VendorId>RVMC</VendorId><VendorDescription>Local-only Revit MCP bridge</VendorDescription></AddIn></RevitAddIns>
