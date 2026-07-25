@@ -62,3 +62,10 @@ The repo is the source of truth, but three deployed copies must be kept in sync 
 Bridge changes cost a Revit restart; design around it. Prefer, in order: saved tools (no restart at all) → Python provider edits (Python ON click) → Roslyn provider (reload_tool_provider) → bridge rebuild (restart). Batch bridge changes so one install carries several.
 
 Git: private origin `alrigithub/revit-mcp-stack`. Commit at milestones together with the version bump so `version.txt` stays traceable to code.
+
+# Roadmap: 
+
+To do: 
+- LSP + Revit Stubs
+- Version Compatibility with 2026 / 2027
+- E-mail Ysk for Security Check. 
