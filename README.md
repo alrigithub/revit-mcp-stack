@@ -1,47 +1,48 @@
-# Revit MCP bridge v0.9
+# Revit MCP
 
-This workspace contains a local-only Revit automation stack. It has no network listener, telemetry, Node runtime, `pywin32`, or pyRevit Routes dependency.
+Revit MCP lets an AI assistant read and change an open Revit model. The Revit connection and code execution stay on your computer.
 
-| Component | Responsibility |
-| --- | --- |
-| [`revit-c-bridge`](revit-c-bridge/README.md) | Revit `IExternalApplication`, current-user named pipe, discovery, bounded UI queue, request ledger, document/transaction binding, verification, and isolated Roslyn execution. |
-| [`revit-pyrevit-extention`](revit-pyrevit-extention/README.md) | Zero-package pyRevit companion that registers a persistent IronPython delegate and exposes Python ON/OFF controls. The folder name intentionally follows the agreed spelling. |
-| [`revit-mcp`](revit-mcp/README.md) | Python stdio MCP process, discovery, Win32 named-pipe client, tool schemas, packaging, and live-test adapter. |
+```mermaid
+flowchart LR
+    U["You"] --> A["AI assistant"]
+    A --> M["Python MCP server"]
 
-Both Revit-side capabilities start **OFF** in every Revit session. Bridge ON/OFF controls admission to the pipe. Python ON/OFF independently controls dynamic Python execution. No request confirmation dialogs are used.
+    M -->|"queries or code"| P["Named pipe"]
+    P --> B["C# bridge in Revit"]
+    B --> E["Queue + ExternalEvent<br/>Revit UI thread"]
 
-The C# ribbon also includes an **Activity** control. It opens a compact native Revit dockable pane that follows Revit's light/dark theme live and shows the actual bridge, Python, C#, active-document, queue, and bounded recent-request state. Source code and model results are not logged.
+    E -->|"built-in tools"| R["Revit API"]
+    E -->|"run_python"| PY["pyRevit / IronPython"]
+    E -->|"run_csharp"| CS["Roslyn / C#"]
+    PY --> R
+    CS --> R
 
-## Validation sequence
-
-Run from PowerShell at the repository root:
-
-```powershell
-./revit-c-bridge/scripts/test.ps1
-./revit-mcp/scripts/test.ps1
-./revit-pyrevit-extention/scripts/test.ps1
-./revit-c-bridge/scripts/build.ps1 -RevitYear 2025
-./revit-c-bridge/scripts/package.ps1 -RevitYear 2025
-./revit-mcp/scripts/package.ps1
-./revit-pyrevit-extention/scripts/package.ps1
+    M <-->|"list or run"| S["Saved tools<br/>.json + .py/.cs"]
 ```
 
-Revit 2025 is the current live-tested target:
+Results return through the same path to the AI assistant.
 
-```powershell
-./revit-c-bridge/scripts/build.ps1 -RevitYear 2025
-./revit-c-bridge/scripts/package.ps1 -RevitYear 2025
-./revit-c-bridge/scripts/install.ps1 -RevitYear 2025
-./revit-pyrevit-extention/scripts/install.ps1
-./revit-mcp/validation/run-live.ps1 -RevitYear 2025
+## Saved tools
+
+A saved tool is a proven script stored in:
+
+```text
+%LOCALAPPDATA%\RevitMcp\tools\
 ```
 
-The live harness writes JSON Lines results and a Markdown summary under `revit-mcp/validation/results/`. It does not infer a pass for any unchecked Revit-only behavior. See [`LIVE-REVIT-CHECKLIST.md`](revit-mcp/validation/LIVE-REVIT-CHECKLIST.md).
+Each tool has a manifest (`name.json`) and a script (`name.py` or `name.cs`). Change the root from **Activity → Settings**.
 
-## Security boundary
+- `list_saved_tools` reads the files without contacting Revit.
+- `run_saved_tool` validates the inputs, then uses the normal `run_python` or `run_csharp` path.
+- There is no `save_tool` MCP command. You or the AI assistant create the two files directly.
+- Subfolders are groups. Disable a group or one tool from **Activity → Saved**.
+- Disable built-in MCP tools from **Activity → Tools**.
 
-V0.x trusts clients running as the same Windows user. The boundary is a current-user-only named pipe plus a random per-process nonce, bounded frames/source/results/queue/logs, explicit session gates, and no listening TCP port. Protocol fields reserve room for future authentication; V0.x does not claim full client identity.
+## Start
 
-## Generated artifacts
+1. Open Revit.
+2. Click **Bridge ON**.
+3. Click **Python ON** if you want to run Python.
+4. Ask the AI assistant to inspect or modify the model.
 
-Build/package outputs are ignored in every component. Packaging scripts copy only reviewed build outputs into a staging directory. Target-PC install scripts do not resolve dependencies and do not require elevation. Authenticode signing is supported by the packaging script when the owner supplies a code-signing certificate; this repository cannot truthfully claim signed output without that certificate.
+The three parts are [`revit-mcp`](revit-mcp/), [`revit-c-bridge`](revit-c-bridge/), and [`revit-pyrevit-extention`](revit-pyrevit-extention/).

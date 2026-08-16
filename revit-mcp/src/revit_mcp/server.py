@@ -10,13 +10,14 @@ from mcp.server.fastmcp import FastMCP
 from . import saved_tools
 from .client import BridgeClient
 from .discovery import pyrevit_install
+from .runtime_settings import load_settings
 
 AGENT_INSTRUCTIONS = """Local-only Revit bridge. Select a PID and explicit document session/generation before Revit work.
 Batch related model work into ONE run_python or run_csharp script instead of many small calls: each call waits for Revit's single UI-thread ExternalEvent and may be delayed while Revit is busy or modal. Use execute_batch when separate steps specifically need atomic grouping and structured per-step results.
 Python source is IronPython 2.7: no f-strings or Python 3-only syntax; use % or .format(), return JSON-safe data through _result, and use the available uiapp, doc, uidoc, request, Revit API, and .NET interop objects.
 If Revit is busy/modal and a request remains queued or reports revit_busy, wait until Revit is ready. Retry reads safely; for mutations, first resolve get_request_status and reuse the same request_id/idempotency_key rather than blindly creating a second mutation.
 transaction_mode is required for dynamic code: read opens no transaction; auto wraps one bridge-owned transaction; manual makes the script own and close every transaction; group wraps one bridge-owned transaction inside an assimilated group for one undo item.
-Saved tools are proven scripts promoted to reusable named tools on disk: discover them with list_saved_tools and run them with run_saved_tool; new saved tools are available immediately without restart."""
+Saved tools are proven scripts promoted to reusable named tools on disk: call list_saved_tools before creating files so you use its configured root; subfolders are groups. Run enabled tools with run_saved_tool. New files and enable/disable markers are live immediately without restart."""
 
 client = BridgeClient()
 
@@ -48,7 +49,21 @@ def _environment_note() -> str:
     return "\n".join(lines)
 
 
-mcp = FastMCP("revit-mcp-local", instructions=AGENT_INSTRUCTIONS + "\n" + _environment_note())
+class ConfigurableFastMCP(FastMCP):
+    async def list_all_tools(self):
+        return await super().list_tools()
+
+    async def list_tools(self):
+        disabled = load_settings().disabled_mcp_tools
+        return [tool for tool in await self.list_all_tools() if tool.name not in disabled]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        if name in load_settings().disabled_mcp_tools:
+            raise PermissionError("MCP tool %r is disabled in Revit MCP settings" % name)
+        return await super().call_tool(name, arguments)
+
+
+mcp = ConfigurableFastMCP("revit-mcp-local", instructions=AGENT_INSTRUCTIONS + "\n" + _environment_note())
 
 
 def _call(pid: int, tool: str, arguments: dict[str, Any] | None = None, document_session: str | None = None,
@@ -193,17 +208,17 @@ def reload_tool_provider(pid: int, timeout_ms: int = 30_000) -> dict[str, Any]:
 
 @mcp.tool()
 def list_saved_tools(name: str | None = None) -> dict[str, Any]:
-    """List saved tools: proven scripts promoted to reusable named tools, stored as manifest+source files in the local registry. Without `name`, returns every tool's name/description plus invalid manifests with reasons. With `name`, returns that tool's full detail including its parameter schema and pinned transaction_mode. The registry is read per call, so newly saved tools are available immediately; run them with run_saved_tool."""
+    """List saved tools and the configured registry root. Folder paths are group names. Disabled tools remain visible but cannot run. Without `name`, returns every tool plus invalid manifests; with a tool ID such as `qa/list_levels`, returns full detail. Read this before creating saved-tool files so they go to the configured root."""
     if name is None:
         return saved_tools.list_saved_tools()
-    return saved_tools.describe_saved_tool(saved_tools.load_saved_tool(name))
+    return saved_tools.describe_saved_tool(saved_tools.load_saved_tool(name, allow_disabled=True))
 
 
 @mcp.tool()
 def run_saved_tool(pid: int, document_session: str, document_generation: int, name: str,
                    params: dict[str, Any] | None = None, timeout_ms: int | None = None,
                    request_id: str | None = None, idempotency_key: str | None = None) -> dict[str, Any]:
-    """Run a saved tool by name with params validated against its manifest; discover names and parameter schemas via list_saved_tools. The manifest pins the engine and transaction_mode, and params reach the script as its `request` object. Same queue/busy semantics as run_python/run_csharp: if queued/revit_busy, wait; check status and reuse IDs before retrying mutations."""
+    """Run an enabled saved tool by ID with params validated against its manifest; folder groups use IDs such as `qa/list_levels`. Discover IDs and schemas via list_saved_tools. The manifest pins the engine and transaction_mode, and params reach the script as its `request` object."""
     tool = saved_tools.load_saved_tool(name)
     arguments = saved_tools.validate_arguments(tool, params or {})
     bridge_tool = "run_python" if tool.engine == "python" else "run_csharp"
@@ -221,7 +236,7 @@ def write_tools_manifest(root: Path | None = None) -> Path:
     """Publish the exact tool list and descriptions the LLM receives, for the Revit Activity pane."""
     root = root or Path(os.environ["LOCALAPPDATA"]) / "RevitMcp"
     root.mkdir(parents=True, exist_ok=True)
-    tools = asyncio.run(mcp.list_tools())
+    tools = asyncio.run(mcp.list_all_tools())
     payload = {
         "written_utc": datetime.now(timezone.utc).isoformat(),
         "server": "revit-mcp-local",

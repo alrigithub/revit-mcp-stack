@@ -3,7 +3,7 @@ import threading
 import unittest
 
 from revit_mcp.protocol import encode_frame, read_frame
-from revit_mcp.winpipe import PipeIoThread
+from revit_mcp.winpipe import PipeIoThread, PipeTransportError
 
 
 class FakeWin32:
@@ -50,6 +50,30 @@ class FakeBridgeTests(unittest.TestCase):
 
             self.assertEqual("health", read_frame(read)["tool"])
             self.assertEqual("revit-mcp-pipe-io", transport._thread.name)
+        finally:
+            transport.close()
+
+    def test_transport_recovers_after_broken_pipe(self):
+        class BreakOnce(FakeWin32):
+            def __init__(self):
+                super().__init__()
+                self.break_next = True
+
+            def read(self, handle, count):
+                if self.break_next:
+                    self.break_next = False
+                    return b""
+                return super().read(handle, count)
+
+        api = BreakOnce()
+        transport = PipeIoThread(api)
+        try:
+            with self.assertRaises(PipeTransportError) as caught:
+                transport.request("fake", {"request_id": "one"}, 1000)
+            self.assertEqual("pipe_disconnected", caught.exception.code)
+            api.response = bytearray(encode_frame({"state": "succeeded", "result": {"recovered": True}}))
+            response = transport.request("fake", {"request_id": "two"}, 1000)
+            self.assertTrue(response["result"]["recovered"])
         finally:
             transport.close()
 

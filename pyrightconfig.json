@@ -1,0 +1,27 @@
+{
+  "include": [
+    "revit-pyrevit-extention/RevitMCP.extension"
+  ],
+  "exclude": [
+    "**/__pycache__"
+  ],
+  "extraPaths": [
+    "revit-pyrevit-extention/RevitMCP.extension/lib",
+    ".lint/stubs/RVT25"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+  "reportPossiblyUnboundVariable": "error",
+  "reportUndefinedVariable": "error",
+  "reportAttributeAccessIssue": "none",
+  "reportCallIssue": "none",
+  "reportArgumentType": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalCall": "none",
+  "reportOperatorIssue": "none",
+  "reportIndexIssue": "none",
+  "reportAssignmentType": "none",
+  "reportReturnType": "none"
+}

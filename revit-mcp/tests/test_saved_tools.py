@@ -26,6 +26,8 @@ class SavedToolsTests(unittest.TestCase):
             write_tool(root, "list_levels", manifest("list_levels"), "_result = {'ok': True}")
             listing = list_saved_tools(root)
             self.assertEqual(["list_levels"], [t["name"] for t in listing["tools"]])
+            self.assertEqual(["list_levels"], [t["id"] for t in listing["tools"]])
+            self.assertTrue(listing["tools"][0]["enabled"])
             self.assertEqual([], listing["invalid"])
             tool = load_saved_tool("list_levels", root)
             self.assertEqual("read", tool.transaction_mode)
@@ -63,6 +65,43 @@ class SavedToolsTests(unittest.TestCase):
             for bad in ("../evil", "UPPER", "has space", ""):
                 with self.assertRaises(ValueError):
                     load_saved_tool(bad, Path(folder))
+
+    def test_folder_groups_are_part_of_tool_id(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            group = root / "qa" / "model"
+            group.mkdir(parents=True)
+            write_tool(group, "list_levels", manifest("list_levels"))
+            listing = list_saved_tools(root)
+            self.assertEqual("qa/model/list_levels", listing["tools"][0]["id"])
+            self.assertEqual("qa/model", listing["tools"][0]["group"])
+            self.assertEqual("qa/model/list_levels", load_saved_tool("qa/model/list_levels", root).id)
+
+    def test_group_marker_disables_every_tool_below_it(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            group = root / "qa"
+            group.mkdir()
+            write_tool(group, "one", manifest("one"))
+            nested = group / "model"
+            nested.mkdir()
+            write_tool(nested, "two", manifest("two"))
+            (group / ".disabled").write_text("", encoding="utf-8")
+            listing = list_saved_tools(root)
+            self.assertEqual([False, False], [tool["enabled"] for tool in listing["tools"]])
+            with self.assertRaises(PermissionError):
+                load_saved_tool("qa/one", root)
+            self.assertEqual("qa/one", load_saved_tool("qa/one", root, allow_disabled=True).id)
+
+    def test_tool_marker_disables_only_one_tool(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            write_tool(root, "one", manifest("one"))
+            write_tool(root, "two", manifest("two"))
+            (root / "one.disabled").write_text("", encoding="utf-8")
+            listing = {tool["id"]: tool for tool in list_saved_tools(root)["tools"]}
+            self.assertFalse(listing["one"]["enabled"])
+            self.assertTrue(listing["two"]["enabled"])
 
     def test_argument_validation(self):
         with tempfile.TemporaryDirectory() as folder:

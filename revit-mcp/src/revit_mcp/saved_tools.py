@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .runtime_settings import load_settings
 
 MANIFEST_VERSION = 1
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -19,20 +20,50 @@ MAX_LISTED_TOOLS = 200
 
 @dataclass(frozen=True)
 class SavedTool:
+    id: str
     name: str
+    group: str
     description: str
     engine: str
     transaction_mode: str
     timeout_ms: int
     params: tuple[dict[str, Any], ...]
     source: str
+    enabled: bool
+    disabled_reason: str | None
 
 
 def registry_root() -> Path:
-    local = os.environ.get("LOCALAPPDATA")
-    if not local:
-        raise RuntimeError("LOCALAPPDATA is unavailable")
-    return Path(local) / "RevitMcp" / "tools"
+    return load_settings().saved_tools_root
+
+
+def _relative_id(manifest_path: Path, root: Path) -> tuple[str, str]:
+    relative = manifest_path.relative_to(root)
+    group_parts = relative.parts[:-1]
+    if any(not NAME_PATTERN.fullmatch(part) for part in group_parts):
+        raise ValueError("group folder names must match %s" % NAME_PATTERN.pattern)
+    group = "/".join(group_parts)
+    return ("%s/%s" % (group, manifest_path.stem) if group else manifest_path.stem), group
+
+
+def _manifest_path(tool_id: str, root: Path) -> Path:
+    parts = tool_id.replace("\\", "/").split("/")
+    if not parts or any(not NAME_PATTERN.fullmatch(part) for part in parts):
+        raise ValueError("tool id segments must match %s" % NAME_PATTERN.pattern)
+    return root.joinpath(*parts[:-1], parts[-1] + ".json")
+
+
+def _disabled_state(manifest_path: Path, root: Path) -> tuple[bool, str | None]:
+    tool_marker = manifest_path.with_suffix(".disabled")
+    if tool_marker.is_file():
+        return False, "tool disabled"
+    current = manifest_path.parent
+    while current != root:
+        if (current / ".disabled").is_file():
+            group = current.relative_to(root).as_posix()
+            return False, "group %s disabled" % group
+        current = current.parent
+    return True, None
 
 
 def _validate_param(entry: Any) -> dict[str, Any]:
@@ -50,7 +81,7 @@ def _validate_param(entry: Any) -> dict[str, Any]:
     return entry
 
 
-def _load_manifest(manifest_path: Path) -> SavedTool:
+def _load_manifest(manifest_path: Path, root: Path) -> SavedTool:
     raw = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("manifest must be a JSON object")
@@ -84,39 +115,47 @@ def _load_manifest(manifest_path: Path) -> SavedTool:
     if source_path.stat().st_size > MAX_SOURCE_BYTES:
         raise ValueError("source exceeds %d bytes" % MAX_SOURCE_BYTES)
     source = source_path.read_text(encoding="utf-8")
-    return SavedTool(name, description.strip(), engine, raw["transaction_mode"], timeout_ms, params, source)
+    tool_id, group = _relative_id(manifest_path, root)
+    enabled, disabled_reason = _disabled_state(manifest_path, root)
+    return SavedTool(tool_id, name, group, description.strip(), engine, raw["transaction_mode"],
+                     timeout_ms, params, source, enabled, disabled_reason)
 
 
 def list_saved_tools(root: Path | None = None) -> dict[str, Any]:
     root = root or registry_root()
     tools: list[dict[str, Any]] = []
     invalid: list[dict[str, str]] = []
-    manifests = sorted(root.glob("*.json")) if root.exists() else []
+    manifests = sorted(root.rglob("*.json")) if root.exists() else []
     for path in manifests[:MAX_LISTED_TOOLS]:
         try:
-            tool = _load_manifest(path)
-            tools.append({"name": tool.name, "description": tool.description, "engine": tool.engine})
+            tool = _load_manifest(path, root)
+            tools.append({"id": tool.id, "name": tool.name, "group": tool.group,
+                          "description": tool.description, "engine": tool.engine,
+                          "enabled": tool.enabled, "disabled_reason": tool.disabled_reason})
         except (OSError, ValueError, json.JSONDecodeError) as ex:
-            invalid.append({"file": path.name, "reason": str(ex)})
+            invalid.append({"file": path.relative_to(root).as_posix(), "reason": str(ex)})
     result: dict[str, Any] = {"root": str(root), "tools": tools, "invalid": invalid}
     if len(manifests) > MAX_LISTED_TOOLS:
         result["truncated"] = True
     return result
 
 
-def load_saved_tool(name: str, root: Path | None = None) -> SavedTool:
-    if not NAME_PATTERN.match(name or ""):
-        raise ValueError("tool name must match %s" % NAME_PATTERN.pattern)
+def load_saved_tool(name: str, root: Path | None = None, allow_disabled: bool = False) -> SavedTool:
     root = root or registry_root()
-    manifest_path = root / ("%s.json" % name)
+    manifest_path = _manifest_path(name or "", root)
     if not manifest_path.is_file():
         raise LookupError("no saved tool named %r in %s" % (name, root))
-    return _load_manifest(manifest_path)
+    tool = _load_manifest(manifest_path, root)
+    if not tool.enabled and not allow_disabled:
+        raise PermissionError("saved tool %r is disabled: %s" % (tool.id, tool.disabled_reason))
+    return tool
 
 
 def describe_saved_tool(tool: SavedTool) -> dict[str, Any]:
-    return {"name": tool.name, "description": tool.description, "engine": tool.engine,
-            "transaction_mode": tool.transaction_mode, "timeout_ms": tool.timeout_ms, "params": list(tool.params)}
+    return {"id": tool.id, "name": tool.name, "group": tool.group, "description": tool.description,
+            "engine": tool.engine, "transaction_mode": tool.transaction_mode,
+            "timeout_ms": tool.timeout_ms, "params": list(tool.params), "enabled": tool.enabled,
+            "disabled_reason": tool.disabled_reason}
 
 
 def validate_arguments(tool: SavedTool, arguments: dict[str, Any]) -> dict[str, Any]:

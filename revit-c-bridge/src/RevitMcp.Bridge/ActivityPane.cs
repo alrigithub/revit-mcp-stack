@@ -38,15 +38,17 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
     private readonly Button _activityButton = new();
     private readonly Button _toolsButton = new();
     private readonly Button _savedButton = new();
+    private readonly Button _settingsButton = new();
     private readonly Button _clearButton = new();
     private UITheme? _appliedTheme;
     private string? _lastDocumentTitle;
     private PaneView _view = PaneView.Activity;
     private DateTime _toolsManifestStamp;
     private DateTime _savedStamp;
+    private DateTime _settingsStamp;
     private int _savedCount = -1;
 
-    private enum PaneView { Activity, Tools, Saved }
+    private enum PaneView { Activity, Tools, Saved, Settings }
 
     public ActivityPane(BridgeRuntime runtime)
     {
@@ -137,6 +139,11 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
             RefreshSaved();
             return;
         }
+        if (_view == PaneView.Settings)
+        {
+            RefreshSettings();
+            return;
+        }
 
         var rows = BuildRows(_runtime.Log.Entries(200));
         var finished = rows.OfType<RequestRow>().Where(row => row.Terminal is not null).ToArray();
@@ -188,6 +195,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         controlsGrid.ColumnDefinitions.Add(new ColumnDefinition());
         controlsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         controlsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        controlsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _totals.FontSize = 10;
         _totals.VerticalAlignment = VerticalAlignment.Center;
         _totals.Margin = new Thickness(0, 0, 8, 0);
@@ -210,6 +218,12 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         _savedButton.Click += (_, _) => SetView(PaneView.Saved);
         Grid.SetColumn(_savedButton, 3);
         controlsGrid.Children.Add(_savedButton);
+        ConfigureSegment(_settingsButton, "Settings");
+        _settingsButton.ToolTip = "Saved-tool location and runtime MCP tool controls.";
+        _settingsButton.Margin = new Thickness(1, 0, 0, 0);
+        _settingsButton.Click += (_, _) => SetView(PaneView.Settings);
+        Grid.SetColumn(_settingsButton, 4);
+        controlsGrid.Children.Add(_settingsButton);
         controls.Child = controlsGrid;
         Grid.SetRow(controls, 1);
         root.Children.Add(controls);
@@ -262,6 +276,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         _view = view;
         _toolsManifestStamp = default;
         _savedStamp = default;
+        _settingsStamp = default;
         _savedCount = -1;
         ApplySegmentStyles();
         Refresh(_lastDocumentTitle);
@@ -272,6 +287,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         _activityButton.Style = _view == PaneView.Activity ? ActiveSegmentStyle() : FlatButtonStyle();
         _toolsButton.Style = _view == PaneView.Tools ? ActiveSegmentStyle() : FlatButtonStyle();
         _savedButton.Style = _view == PaneView.Saved ? ActiveSegmentStyle() : FlatButtonStyle();
+        _settingsButton.Style = _view == PaneView.Settings ? ActiveSegmentStyle() : FlatButtonStyle();
     }
 
     private StackPanel StatusChip(Ellipse dot, string label)
@@ -477,9 +493,29 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
     {
         var item = new ListBoxItem();
         var panel = new StackPanel();
+        var line = new Grid();
+        line.ColumnDefinitions.Add(new ColumnDefinition());
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var name = ThemedText(tool.Name ?? "?", TextKey);
         name.FontWeight = FontWeights.SemiBold;
-        panel.Children.Add(name);
+        line.Children.Add(name);
+        if (!string.IsNullOrWhiteSpace(tool.Name))
+        {
+            var enabled = !LocalSettingsStore.Load().DisabledMcpTools.Contains(tool.Name);
+            var toggle = SmallActionButton(enabled ? "Disable" : "Enable");
+            toggle.ToolTip = enabled
+                ? "Disable this MCP tool immediately. Reconnect the AI client to refresh its visible tool list."
+                : "Enable this MCP tool. Reconnect the AI client to refresh its visible tool list.";
+            toggle.Click += (_, _) =>
+            {
+                LocalSettingsStore.SetMcpToolEnabled(tool.Name, !enabled);
+                _toolsManifestStamp = default;
+                RefreshTools();
+            };
+            Grid.SetColumn(toggle, 1);
+            line.Children.Add(toggle);
+        }
+        panel.Children.Add(line);
         if (tool.Params is { Count: > 0 })
         {
             var parameters = ThemedText(string.Join(", ", tool.Params), MutedTextKey);
@@ -512,17 +548,24 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         [property: System.Text.Json.Serialization.JsonPropertyName("type")] string? Type,
         [property: System.Text.Json.Serialization.JsonPropertyName("required")] bool Required);
 
-    private static string SavedToolsRoot =>
-        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RevitMcp", "tools");
+    private static string SavedToolsRoot => LocalSettingsStore.Load().SavedToolsRoot;
 
     private void RefreshSaved()
     {
+        var root = SavedToolsRoot;
         string[] manifests;
-        try { manifests = Directory.Exists(SavedToolsRoot) ? Directory.GetFiles(SavedToolsRoot, "*.json") : []; }
-        catch { manifests = []; }
-        var stamp = default(DateTime);
-        foreach (var path in manifests)
+        string[] markers;
+        try
         {
+            manifests = Directory.Exists(root) ? Directory.GetFiles(root, "*.json", SearchOption.AllDirectories) : [];
+        }
+        catch { manifests = []; }
+        try { markers = Directory.Exists(root) ? Directory.GetFiles(root, "*.disabled", SearchOption.AllDirectories) : []; }
+        catch { markers = []; }
+        var stamp = default(DateTime);
+        foreach (var path in manifests.Concat(markers).Append(LocalSettingsStore.SettingsPath))
+        {
+            if (!File.Exists(path)) continue;
             var written = File.GetLastWriteTimeUtc(path);
             if (written > stamp) stamp = written;
         }
@@ -532,19 +575,40 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
 
         _activity.Items.Clear();
         var shown = 0;
-        foreach (var path in manifests.OrderBy(System.IO.Path.GetFileName))
+        foreach (var path in manifests.Where(path => string.Equals(System.IO.Path.GetDirectoryName(path), root, StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(System.IO.Path.GetFileName))
         {
-            SavedManifest? manifest = null;
-            try { manifest = System.Text.Json.JsonSerializer.Deserialize<SavedManifest>(File.ReadAllText(path)); }
-            catch { manifest = null; }
-            _activity.Items.Add(SavedItem(System.IO.Path.GetFileName(path), manifest));
+            _activity.Items.Add(SavedItem(root, path, ReadSavedManifest(path)));
             shown++;
+        }
+
+        var groupSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var manifestPath in manifests)
+        {
+            var directory = System.IO.Path.GetDirectoryName(manifestPath);
+            while (directory is not null && !string.Equals(directory, root, StringComparison.OrdinalIgnoreCase))
+            {
+                groupSet.Add(directory);
+                directory = Directory.GetParent(directory)?.FullName;
+            }
+        }
+        var groups = groupSet
+            .OrderBy(directory => System.IO.Path.GetRelativePath(root, directory), StringComparer.OrdinalIgnoreCase);
+        foreach (var group in groups)
+        {
+            _activity.Items.Add(SavedGroupItem(root, group));
+            foreach (var path in manifests.Where(path => string.Equals(System.IO.Path.GetDirectoryName(path), group, StringComparison.OrdinalIgnoreCase))
+                         .OrderBy(System.IO.Path.GetFileName))
+            {
+                _activity.Items.Add(SavedItem(root, path, ReadSavedManifest(path)));
+                shown++;
+            }
         }
         _totals.Text = shown == 0 ? "" : shown + " saved tools";
         if (shown == 0)
         {
             var item = new ListBoxItem();
-            var message = ThemedText("No saved tools yet. Proven scripts land here as manifest + script pairs in " + SavedToolsRoot + " and are usable immediately.", SecondaryTextKey);
+            var message = ThemedText("No saved tools yet. Proven scripts land here as manifest + script pairs in " + root + " and are usable immediately.", SecondaryTextKey);
             message.TextWrapping = TextWrapping.Wrap;
             message.Margin = new Thickness(4, 8, 4, 8);
             item.Content = message;
@@ -552,13 +616,45 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         }
     }
 
-    private ListBoxItem SavedItem(string fileName, SavedManifest? manifest)
+    private static SavedManifest? ReadSavedManifest(string path)
+    {
+        try { return System.Text.Json.JsonSerializer.Deserialize<SavedManifest>(File.ReadAllText(path)); }
+        catch { return null; }
+    }
+
+    private ListBoxItem SavedGroupItem(string root, string directory)
+    {
+        var item = new ListBoxItem();
+        var line = new Grid();
+        line.ColumnDefinitions.Add(new ColumnDefinition());
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var relative = System.IO.Path.GetRelativePath(root, directory).Replace(System.IO.Path.DirectorySeparatorChar, '/');
+        var inheritedEnabled = LocalSettingsStore.GroupsEnabled(root, Directory.GetParent(directory)?.FullName ?? root);
+        var directlyEnabled = !File.Exists(System.IO.Path.Combine(directory, ".disabled"));
+        var name = ThemedText(relative, directlyEnabled && inheritedEnabled ? TextKey : MutedTextKey);
+        name.FontWeight = FontWeights.SemiBold;
+        line.Children.Add(name);
+        var toggle = SmallActionButton(directlyEnabled ? "Disable group" : "Enable group");
+        toggle.IsEnabled = inheritedEnabled;
+        toggle.Click += (_, _) =>
+        {
+            LocalSettingsStore.SetGroupEnabled(directory, !directlyEnabled);
+            _savedCount = -1;
+            RefreshSaved();
+        };
+        Grid.SetColumn(toggle, 1);
+        line.Children.Add(toggle);
+        item.Content = line;
+        return item;
+    }
+
+    private ListBoxItem SavedItem(string root, string manifestPath, SavedManifest? manifest)
     {
         var item = new ListBoxItem();
         var panel = new StackPanel();
         if (manifest?.Name is null)
         {
-            var broken = ThemedText(fileName + " — invalid manifest", ErrorKey);
+            var broken = ThemedText(System.IO.Path.GetRelativePath(root, manifestPath) + " — invalid manifest", ErrorKey);
             broken.TextWrapping = TextWrapping.Wrap;
             panel.Children.Add(broken);
             item.Content = panel;
@@ -568,14 +664,28 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         var line = new Grid();
         line.ColumnDefinitions.Add(new ColumnDefinition());
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var groupsEnabled = LocalSettingsStore.GroupsEnabled(root, System.IO.Path.GetDirectoryName(manifestPath)!);
+        var directlyEnabled = !File.Exists(System.IO.Path.ChangeExtension(manifestPath, ".disabled"));
         var name = ThemedText(manifest.Name, TextKey);
         name.FontWeight = FontWeights.SemiBold;
+        if (!groupsEnabled || !directlyEnabled) name.SetResourceReference(TextBlock.ForegroundProperty, MutedTextKey);
         line.Children.Add(name);
         var meta = ThemedText((manifest.Engine ?? "?") + " · " + (manifest.TransactionMode ?? "?"), MutedTextKey);
         meta.FontSize = 10;
         meta.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(meta, 1);
         line.Children.Add(meta);
+        var toggle = SmallActionButton(directlyEnabled ? "Disable" : "Enable");
+        toggle.IsEnabled = groupsEnabled;
+        toggle.Click += (_, _) =>
+        {
+            LocalSettingsStore.SetSavedToolEnabled(manifestPath, !directlyEnabled);
+            _savedCount = -1;
+            RefreshSaved();
+        };
+        Grid.SetColumn(toggle, 2);
+        line.Children.Add(toggle);
         panel.Children.Add(line);
 
         if (manifest.Params is { Count: > 0 })
@@ -597,6 +707,92 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         }
         item.Content = panel;
         return item;
+    }
+
+    private void RefreshSettings()
+    {
+        DateTime stamp;
+        try { stamp = File.GetLastWriteTimeUtc(LocalSettingsStore.SettingsPath); }
+        catch { stamp = default; }
+        if (stamp == _settingsStamp && _activity.Items.Count > 0) return;
+        _settingsStamp = stamp;
+
+        var settings = LocalSettingsStore.Load();
+        _activity.Items.Clear();
+        _totals.Text = settings.Error is null ? "" : "Invalid settings";
+
+        var item = new ListBoxItem();
+        var panel = new StackPanel();
+        var title = ThemedText("Saved tools folder", TextKey);
+        title.FontWeight = FontWeights.SemiBold;
+        panel.Children.Add(title);
+        var note = ThemedText("The model reads this path from list_saved_tools before creating files.", SecondaryTextKey);
+        note.FontSize = 10;
+        note.TextWrapping = TextWrapping.Wrap;
+        note.Margin = new Thickness(0, 2, 0, 6);
+        panel.Children.Add(note);
+
+        var pathBox = new System.Windows.Controls.TextBox
+        {
+            Text = settings.SavedToolsRoot,
+            Padding = new Thickness(5, 3, 5, 3),
+            BorderThickness = new Thickness(1)
+        };
+        pathBox.SetResourceReference(Control.BackgroundProperty, SurfaceKey);
+        pathBox.SetResourceReference(Control.ForegroundProperty, TextKey);
+        pathBox.SetResourceReference(Control.BorderBrushProperty, BorderKey);
+        panel.Children.Add(pathBox);
+
+        var save = SmallActionButton("Save folder");
+        save.HorizontalAlignment = HorizontalAlignment.Left;
+        save.Margin = new Thickness(0, 6, 0, 0);
+        save.Click += (_, _) =>
+        {
+            try
+            {
+                LocalSettingsStore.SetSavedToolsRoot(pathBox.Text);
+                pathBox.Text = LocalSettingsStore.Load().SavedToolsRoot;
+                _totals.Text = "Settings saved";
+                _savedCount = -1;
+                _settingsStamp = File.GetLastWriteTimeUtc(LocalSettingsStore.SettingsPath);
+            }
+            catch (Exception ex)
+            {
+                _totals.Text = "Settings error";
+                pathBox.ToolTip = ex.Message;
+            }
+        };
+        panel.Children.Add(save);
+
+        if (settings.Error is not null)
+        {
+            var error = ThemedText(settings.Error, ErrorKey);
+            error.TextWrapping = TextWrapping.Wrap;
+            error.Margin = new Thickness(0, 6, 0, 0);
+            panel.Children.Add(error);
+        }
+        var reconnect = ThemedText("Built-in MCP tool switches are on the Tools page. Reconnect the AI client after changing them so its visible tool list refreshes.", MutedTextKey);
+        reconnect.FontSize = 10;
+        reconnect.TextWrapping = TextWrapping.Wrap;
+        reconnect.Margin = new Thickness(0, 10, 0, 0);
+        panel.Children.Add(reconnect);
+        item.Content = panel;
+        _activity.Items.Add(item);
+    }
+
+    private Button SmallActionButton(string label)
+    {
+        var button = new Button
+        {
+            Content = label,
+            MinWidth = 48,
+            Height = 20,
+            Padding = new Thickness(7, 0, 7, 0),
+            Margin = new Thickness(8, 0, 0, 0),
+            FontSize = 10,
+            Style = FlatButtonStyle()
+        };
+        return button;
     }
 
     private static string FormatMs(long ms) => ms < 1000 ? ms + "ms" : FormatSeconds(ms / 1000.0);

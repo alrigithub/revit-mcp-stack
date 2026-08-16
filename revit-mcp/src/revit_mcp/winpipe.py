@@ -133,6 +133,8 @@ class PipeIoThread:
                 timer.start()
                 write_all(lambda data: self._api.write(handle, data), encode_frame(task.message))
                 task.result = read_frame(lambda count: self._api.read(handle, count))
+            except ProtocolError as error:
+                task.error = PipeTransportError(error.code, str(error))
             except BaseException as error:
                 task.error = error
             finally:
