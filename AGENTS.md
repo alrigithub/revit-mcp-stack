@@ -51,7 +51,7 @@ Live smoke-testing against Revit: drive `revit_mcp.server` functions directly wi
 
 ## Deployment mirrors (critical)
 
-The repo is the source of truth, but three deployed copies must be kept in sync after edits — nothing rebuilds them automatically:
+The repo is the source of truth, but three deployed copies must be kept in sync after edits — nothing rebuilds them automatically. `./sync.ps1` copies the first two; `./doctor.ps1` reports drift and install health:
 
 - `revit-mcp/src/revit_mcp/*` → `%LOCALAPPDATA%\RevitMcp\mcp\0.9.0\revit_mcp\` (plain source, copy files)
 - `revit-pyrevit-extention/RevitMCP.extension/*` → `%APPDATA%\pyRevit\Extensions\RevitMCP.extension\` (then Python ON in Revit to reload the provider)

@@ -46,3 +46,8 @@ Each tool has a manifest (`name.json`) and a script (`name.py` or `name.cs`). Ch
 4. Ask the AI assistant to inspect or modify the model.
 
 The three parts are [`revit-mcp`](revit-mcp/), [`revit-c-bridge`](revit-c-bridge/), and [`revit-pyrevit-extention`](revit-pyrevit-extention/).
+
+## Maintenance
+
+- `./doctor.ps1` checks the three installed components, live bridge instances, runtime settings, and drift between the repo and its deployed copies.
+- `./sync.ps1` copies server and extension changes to their deployed locations. Bridge changes still need package + install with Revit closed.
