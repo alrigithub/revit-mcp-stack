@@ -68,4 +68,3 @@ Git: private origin `alrigithub/revit-mcp-stack`. Commit at milestones together 
 To do: 
 - LSP + Revit Stubs
 - Version Compatibility with 2026 / 2027
-- E-mail Ysk for Security Check. 
