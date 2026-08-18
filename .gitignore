@@ -1,5 +1,7 @@
-# all dot folders (any depth)
+# all dot folders (any depth), except the lint tooling that tracked files reference
 .*/
+!.lint/
+.lint/stubs/
 
 **/bin/
 **/obj/

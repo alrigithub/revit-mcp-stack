@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "name": "tag_rooms",
+  "description": "Tag every placed room visible in the active view (open a floor plan first). Skips rooms that already have a tag in the view and unplaced/unenclosed rooms. Uses the project's default room tag type unless tag_type_id names one. Returns created tag ids with room name/number and tag location in mm. Simplified port of mcp-servers-for-revit tag_all_rooms: the original's automatic view switching was dropped - the caller picks the view.",
+  "engine": "python",
+  "transaction_mode": "auto",
+  "timeout_ms": 60000,
+  "params": [
+    {
+      "name": "use_leader",
+      "type": "boolean",
+      "description": "Show a leader line on each created tag.",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "tag_type_id",
+      "type": "integer",
+      "description": "ElementId of a specific room tag type to apply to the new tags. Omit (or 0) to use the project default.",
+      "required": false,
+      "default": 0
+    }
+  ]
+}

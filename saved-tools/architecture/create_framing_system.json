@@ -1,0 +1,66 @@
+{
+  "manifest_version": 1,
+  "name": "create_framing_system",
+  "description": "Create a structural beam system filling a rectangular boundary (mm, project coordinates) on a level: beams at a fixed center-to-center spacing running along X or Y. Beam type picked by name substring, else the first loaded structural framing type; level by name, else the active plan view's level, else the lowest level. Simplified from the source: rectangular boundary and fixed-distance layout only, beams sit at the level. Requires a loaded beam family. Returns beam system id, beam ids and count.",
+  "engine": "python",
+  "transaction_mode": "auto",
+  "timeout_ms": 60000,
+  "params": [
+    {
+      "name": "x_min_mm",
+      "type": "number",
+      "description": "Minimum X of the rectangular boundary in mm.",
+      "required": true
+    },
+    {
+      "name": "x_max_mm",
+      "type": "number",
+      "description": "Maximum X of the rectangular boundary in mm.",
+      "required": true
+    },
+    {
+      "name": "y_min_mm",
+      "type": "number",
+      "description": "Minimum Y of the rectangular boundary in mm.",
+      "required": true
+    },
+    {
+      "name": "y_max_mm",
+      "type": "number",
+      "description": "Maximum Y of the rectangular boundary in mm.",
+      "required": true
+    },
+    {
+      "name": "spacing_mm",
+      "type": "number",
+      "description": "Center-to-center beam spacing in mm.",
+      "required": true
+    },
+    {
+      "name": "direction",
+      "type": "string",
+      "description": "Beam span direction: 'x' (beams parallel to the X axis) or 'y'.",
+      "required": false,
+      "default": "x"
+    },
+    {
+      "name": "level_name",
+      "type": "string",
+      "description": "Level name, case-insensitive exact match. Omit to use the active plan view's level, else the lowest level.",
+      "required": false
+    },
+    {
+      "name": "beam_type_name",
+      "type": "string",
+      "description": "Substring matched against structural framing 'Family: Type' names, e.g. 'UB305' or 'W12'. Omit to use the first loaded type.",
+      "required": false
+    },
+    {
+      "name": "justify",
+      "type": "string",
+      "description": "Where the first beam sits relative to the boundary: 'beginning', 'center' (default) or 'end'.",
+      "required": false,
+      "default": "center"
+    }
+  ]
+}

@@ -12,10 +12,10 @@ V0.9 is the first live-tested Revit 2025 preview release.
 - Native Revit dockable Activity pane with bridge/provider/document/queue state and bounded recent activity.
 - Activity pane follows Revit light/dark theme changes with matched native spacing, typography, controls, and status colors.
 - Verified live creation, rollback, provider reload, view navigation, and Revit 2025 model automation.
+- Saved tools: manifest+script pairs under `%LOCALAPPDATA%\RevitMcp\tools\`, grouped by subfolder, live at the next call.
 
 ## Not included yet
 
-- Saved named-tool folders and tool hot reload.
 - External Windows UI Automation for add-in dialogs.
 - Revit 2026/2027 live certification.
 

@@ -60,13 +60,24 @@ else {
 }
 
 Write-Host 'Repo-to-deployed drift'
+$toolsRoot = Join-Path $localAppData 'RevitMcp/tools'
+if (Test-Path -LiteralPath $settingsPath) {
+    try {
+        $configured = (Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json).saved_tools_root
+        if ($configured) { $toolsRoot = $configured }
+    }
+    catch { }
+}
 $mirrors = @(
     @{ Name = 'revit-mcp server'
        Source = [IO.Path]::GetFullPath((Join-Path $root 'revit-mcp/src/revit_mcp'))
        Target = Join-Path $mcpRoot 'revit_mcp' },
     @{ Name = 'pyRevit extension'
        Source = [IO.Path]::GetFullPath((Join-Path $root 'revit-pyrevit-extention/RevitMCP.extension'))
-       Target = $extension }
+       Target = $extension },
+    @{ Name = 'saved tools (sync.ps1 -Tools)'
+       Source = [IO.Path]::GetFullPath((Join-Path $root 'saved-tools'))
+       Target = $toolsRoot }
 )
 foreach ($mirror in $mirrors) {
     if (-not (Test-Path -LiteralPath $mirror.Target)) {

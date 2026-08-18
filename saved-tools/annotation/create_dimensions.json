@@ -1,0 +1,30 @@
+{
+  "manifest_version": 1,
+  "name": "create_dimensions",
+  "description": "Create one linear dimension in the active view across two or more elements, given their ids in order. References are picked automatically: the planar face whose normal best aligns with the dimension direction, falling back to the element itself. The dimension line runs through the element locations, offset perpendicular by offset_mm (millimetres). Simplified port of mcp-servers-for-revit create_dimensions (point-picking mode dropped; pass element ids).",
+  "engine": "python",
+  "transaction_mode": "auto",
+  "timeout_ms": 60000,
+  "params": [
+    {
+      "name": "element_ids",
+      "type": "array",
+      "description": "Two or more element ids (integers) to dimension between, in the order they should be chained.",
+      "required": true
+    },
+    {
+      "name": "offset_mm",
+      "type": "number",
+      "description": "Perpendicular offset of the dimension line from the line through the elements, in millimetres.",
+      "required": false,
+      "default": 1000
+    },
+    {
+      "name": "dimension_type_id",
+      "type": "integer",
+      "description": "ElementId of a DimensionType to apply. Omit (or 0) to use the default linear dimension type.",
+      "required": false,
+      "default": 0
+    }
+  ]
+}

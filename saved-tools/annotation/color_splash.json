@@ -1,0 +1,30 @@
+{
+  "manifest_version": 1,
+  "name": "color_splash",
+  "description": "Color all elements of one category in the active view by the value of a parameter: each distinct value gets its own solid-fill override color (deterministic 20-color palette plus generated hues). Instance parameter is checked first, then type; valueless elements group under 'None'. Set reset=true to clear the overrides for the category instead. Returns per-value counts and RGB. Simplified port of mcp-servers-for-revit color_splash (gradient/custom color lists dropped).",
+  "engine": "python",
+  "transaction_mode": "auto",
+  "timeout_ms": 60000,
+  "params": [
+    {
+      "name": "category",
+      "type": "string",
+      "description": "Category name whose elements get colored, e.g. 'Walls', 'Doors', 'Rooms'. Matched case-insensitively against the document's category names.",
+      "required": true
+    },
+    {
+      "name": "parameter_name",
+      "type": "string",
+      "description": "Name of the parameter to group by (instance parameter first, then type parameter), e.g. 'Mark', 'Comments', 'Fire Rating'. Required unless reset is true.",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "reset",
+      "type": "boolean",
+      "description": "If true, clear the graphic overrides of the category's elements in the active view instead of coloring them.",
+      "required": false,
+      "default": false
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "name": "export_room_data",
+  "description": "Exports every placed room (pure read): id, name, number, level, area in m2, volume in m3, perimeter and unbounded height in mm, department, occupancy, phase and comments, sorted by level then number. Rooms with zero area (unplaced, not enclosed, redundant) are skipped unless include_unplaced=true; optional exact level-name filter. Volume is 0 unless Areas and Volumes computation is enabled. Simplified from the C# original: its two zero-area flags were duplicates, merged into one.",
+  "engine": "python",
+  "transaction_mode": "read",
+  "timeout_ms": 60000,
+  "params": [
+    {
+      "name": "include_unplaced",
+      "type": "boolean",
+      "description": "Include rooms whose computed area is 0 (unplaced, not enclosed, or redundant rooms).",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "level",
+      "type": "string",
+      "description": "Only return rooms on this level (exact level name). Empty returns all levels.",
+      "required": false,
+      "default": ""
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "manifest_version": 1,
+  "name": "model_statistics",
+  "description": "Model overview (pure read): project name, element and type totals, loadable family count, non-template view and sheet counts, element counts per category (sorted desc) and per level (with elevation in mm), plus health numbers: warning count, Revit link count, CAD import count. Set include_types=true for the top 50 family/type instance counts. Simplified from the C# original: one pass over the model instead of a rescan per level, and warnings/links/imports added.",
+  "engine": "python",
+  "transaction_mode": "read",
+  "timeout_ms": 60000,
+  "params": [
+    {
+      "name": "include_types",
+      "type": "boolean",
+      "description": "Also return per family/type instance counts (top 50 by count, loadable families only). Off by default to keep the response small.",
+      "required": false,
+      "default": false
+    }
+  ]
+}

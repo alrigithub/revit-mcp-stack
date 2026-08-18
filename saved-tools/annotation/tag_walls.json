@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "name": "tag_walls",
+  "description": "Tag every wall visible in the active view with a horizontal tag at the wall midpoint. Skips walls already tagged in the view. Uses the first wall tag type in the project (falls back to a multi-category tag) unless tag_type_id names one. Returns created tag ids, wall ids/names, and tag locations in mm. Ported from mcp-servers-for-revit tag_all_walls.",
+  "engine": "python",
+  "transaction_mode": "auto",
+  "timeout_ms": 60000,
+  "params": [
+    {
+      "name": "use_leader",
+      "type": "boolean",
+      "description": "Show a leader line on each created tag.",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "tag_type_id",
+      "type": "integer",
+      "description": "ElementId of a specific wall tag (or multi-category tag) type to use. Omit (or 0) to use the first one found.",
+      "required": false,
+      "default": 0
+    }
+  ]
+}

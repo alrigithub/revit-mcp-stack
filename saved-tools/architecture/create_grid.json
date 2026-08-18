@@ -1,0 +1,57 @@
+{
+  "manifest_version": 1,
+  "name": "create_grid",
+  "description": "Create a rectangular grid system from bay spacings (mm) in two directions: x_spacings places grids along X (vertical lines), y_spacings places grids along Y (horizontal lines); N spacings make N+1 grids. Naming per direction is inferred from the start label (letter = A,B..Z,AA; digits = 1,2,3); duplicates get a numeric suffix. Lines extend extension_mm past the outermost grids. Returns created grid ids, names and positions in mm.",
+  "engine": "python",
+  "transaction_mode": "auto",
+  "timeout_ms": 60000,
+  "params": [
+    {
+      "name": "x_spacings",
+      "type": "array",
+      "description": "Bay widths in mm along the X axis between consecutive vertical grids, e.g. [6000, 6000, 8000] makes 4 grids. Empty list makes a single grid.",
+      "required": true
+    },
+    {
+      "name": "y_spacings",
+      "type": "array",
+      "description": "Bay widths in mm along the Y axis between consecutive horizontal grids. Empty list makes a single grid.",
+      "required": true
+    },
+    {
+      "name": "x_start_label",
+      "type": "string",
+      "description": "Label of the first vertical grid. A letter gives alphabetic naming (A, B, ... Z, AA); digits give numeric naming.",
+      "required": false,
+      "default": "A"
+    },
+    {
+      "name": "y_start_label",
+      "type": "string",
+      "description": "Label of the first horizontal grid. Digits give numeric naming (1, 2, 3); a letter gives alphabetic.",
+      "required": false,
+      "default": "1"
+    },
+    {
+      "name": "origin_x_mm",
+      "type": "number",
+      "description": "X position of the first vertical grid in mm (default 0).",
+      "required": false,
+      "default": 0
+    },
+    {
+      "name": "origin_y_mm",
+      "type": "number",
+      "description": "Y position of the first horizontal grid in mm (default 0).",
+      "required": false,
+      "default": 0
+    },
+    {
+      "name": "extension_mm",
+      "type": "number",
+      "description": "How far grid lines extend beyond the outermost crossing grids, in mm (default 2000).",
+      "required": false,
+      "default": 2000
+    }
+  ]
+}

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Local-only Revit MCP stack, three components in one repo:
 
-- `revit-c-bridge/` — C# Revit add-in (net8.0-windows, Revit 2025). Named-pipe server, bounded request queue + ledger, transaction coordinator, Activity dockable pane, ribbon.
+- `revit-c-bridge/` — C# Revit add-in (Revit 2025/2026 on net8.0-windows, 2027 on net10.0-windows; only 2025 is live-certified). Named-pipe server, bounded request queue + ledger, transaction coordinator, Activity dockable pane, ribbon.
 - `revit-mcp/` — pure-Python 3.12 stdio MCP server (`src/revit_mcp/`). ctypes named-pipe client, no pywin32/network. MCP SDK intentionally pinned to `mcp==1.10.1` (1.11+ drags in pywin32); don't upgrade casually.
 - `revit-pyrevit-extention/` — pyRevit extension hosting the IronPython 2.7 execution provider. The tab folder MUST stay named `Revit MCP.tab` (with space) — that exact title merges it with the C# ribbon tab.
 
@@ -21,6 +21,10 @@ Security model: current-user-only pipe + per-process CSPRNG nonce, bounded frame
 - **Saved tools** (tool promotion without rebuilds): manifest+script pairs in `%LOCALAPPDATA%\RevitMcp\tools\` (`name.json` + `name.py`/`.cs`), validated by `revit_mcp/saved_tools.py`, read at call time by `list_saved_tools`/`run_saved_tool` — new files are live immediately, no reconnect. Params reach the script as its `request` object; `transaction_mode` is pinned in the manifest.
 - **Pane data files**: MCP server writes `%LOCALAPPDATA%\RevitMcp\mcp-tools.json` at startup (tool list + LLM descriptions); the Activity pane's Tools/Saved views read these files, never the pipe.
 - **IronPython 2.7 dialect** for all `run_python`/saved python tools: no f-strings, `%`/`.format()` only, JSON-safe `_result`, wrap `ElementId.Value` in `int()` (`_json_safe` rejects .NET `Int64`).
+
+## saved-tools/
+
+Repo folder of prebuilt saved tools (manifest+script pairs, subfolders are groups). Deploy with `./sync.ps1 -Tools` → `%LOCALAPPDATA%\RevitMcp\tools\`; live at the next call, no reconnect. Contract and conventions: `saved-tools/README.md`.
 
 ## Versioning
 
@@ -51,10 +55,11 @@ Live smoke-testing against Revit: drive `revit_mcp.server` functions directly wi
 
 ## Deployment mirrors (critical)
 
-The repo is the source of truth, but three deployed copies must be kept in sync after edits — nothing rebuilds them automatically. `./sync.ps1` copies the first two; `./doctor.ps1` reports drift and install health:
+The repo is the source of truth, but the deployed copies must be kept in sync after edits — nothing rebuilds them automatically. `./sync.ps1` copies the first two (`-Tools` adds the third); `./doctor.ps1` reports drift and install health:
 
 - `revit-mcp/src/revit_mcp/*` → `%LOCALAPPDATA%\RevitMcp\mcp\0.9.0\revit_mcp\` (plain source, copy files)
 - `revit-pyrevit-extention/RevitMCP.extension/*` → `%APPDATA%\pyRevit\Extensions\RevitMCP.extension\` (then Python ON in Revit to reload the provider)
+- `saved-tools/*` → `%LOCALAPPDATA%\RevitMcp\tools\` (only with `-Tools`; live at the next call)
 - bridge: package → close Revit → install → reopen (both Revit-side capabilities come back OFF)
 
 ## Iteration loop with Revit
@@ -63,8 +68,7 @@ Bridge changes cost a Revit restart; design around it. Prefer, in order: saved t
 
 Git: private origin `alrigithub/revit-mcp-stack`. Commit at milestones together with the version bump so `version.txt` stays traceable to code.
 
-# Roadmap: 
+## Roadmap
 
-To do: 
-- LSP + Revit Stubs
-- Version Compatibility with 2026 / 2027
+- LSP + Revit stubs
+- Revit 2026/2027 live certification

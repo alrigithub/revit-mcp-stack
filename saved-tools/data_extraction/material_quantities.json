@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "name": "material_quantities",
+  "description": "Material takeoff (pure read): per-material area in m2 and volume in m3 aggregated across the whole model, a single category, or the current selection. Returns material name, class, area_m2, volume_m3 and element_count sorted by area, plus totals. Counts geometry materials only (paint excluded). Simplified from the C# original: one category filter instead of a list, and per-material element id lists dropped to keep responses small.",
+  "engine": "python",
+  "transaction_mode": "read",
+  "timeout_ms": 60000,
+  "params": [
+    {
+      "name": "category",
+      "type": "string",
+      "description": "Optional category filter: a BuiltInCategory name like 'OST_Walls' or a plain name like 'Walls'. Empty scans all model elements.",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "selected_only",
+      "type": "boolean",
+      "description": "Only analyze the elements currently selected in Revit. Combines with category.",
+      "required": false,
+      "default": false
+    }
+  ]
+}
