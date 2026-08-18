@@ -1,12 +1,11 @@
+# all dot folders (any depth)
+.*/
+
 **/bin/
 **/obj/
 **/artifacts/
 **/dist/
-**/.venv/
 **/__pycache__/
-**/.pytest_cache/
-.lint/stubs/RVT25/
-.lint/stubs/RVT26/
 **/validation/results/*
 !**/validation/results/.gitkeep
 *.user
