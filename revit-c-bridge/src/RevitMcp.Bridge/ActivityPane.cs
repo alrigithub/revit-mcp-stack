@@ -519,15 +519,15 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         line.ColumnDefinitions.Add(new ColumnDefinition());
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var enabled = string.IsNullOrWhiteSpace(tool.Name) || !LocalSettingsStore.Load().DisabledMcpTools.Contains(tool.Name);
         line.Children.Add(ThemedText(expanded ? "▾" : "▸", MutedTextKey));
-        var name = ThemedText(tool.Name ?? "?", TextKey);
+        var name = ThemedText(tool.Name ?? "?", enabled ? TextKey : MutedTextKey);
         name.FontWeight = FontWeights.SemiBold;
         name.TextTrimming = TextTrimming.CharacterEllipsis;
         Grid.SetColumn(name, 1);
         line.Children.Add(name);
         if (!string.IsNullOrWhiteSpace(tool.Name))
         {
-            var enabled = !LocalSettingsStore.Load().DisabledMcpTools.Contains(tool.Name);
             var pill = StatePill(enabled, enabled ? "Enabled" : "Disabled");
             pill.ToolTip = (enabled ? "Click to disable this MCP tool." : "Click to enable this MCP tool.")
                 + " Reconnect the AI client to refresh its visible tool list.";
@@ -767,6 +767,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
     private Style GroupItemStyle()
     {
         var style = new Style(typeof(ListBoxItem));
+        style.Setters.Add(new Setter(Control.TemplateProperty, ItemTemplate()));
         style.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(SectionKey)));
         style.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension(SecondaryTextKey)));
         style.Setters.Add(new Setter(Control.BorderBrushProperty, new DynamicResourceExtension(BorderKey)));
@@ -792,6 +793,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
     private Style PillStyle(string foregroundKey)
     {
         var style = new Style(typeof(Button));
+        style.Setters.Add(new Setter(Control.TemplateProperty, ButtonTemplate(9)));
         style.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(SurfaceKey)));
         style.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension(foregroundKey)));
         style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
@@ -801,6 +803,9 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         var pressed = new Trigger { Property = Button.IsPressedProperty, Value = true };
         pressed.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(PressedKey)));
         style.Triggers.Add(pressed);
+        var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
+        disabled.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension(MutedTextKey)));
+        style.Triggers.Add(disabled);
         return style;
     }
 
@@ -999,9 +1004,40 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         return (Style)XamlReader.Parse(xaml);
     }
 
+    // The default Button chrome paints system hover/pressed colors over the style's
+    // Background triggers (light blue behind light text in the dark theme), so the
+    // themed styles bring their own minimal template: one Border, one ContentPresenter.
+    private static ControlTemplate ButtonTemplate(double cornerRadius)
+    {
+        var border = new FrameworkElementFactory(typeof(Border));
+        border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+        border.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
+        border.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Control.BorderThicknessProperty));
+        border.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Control.PaddingProperty));
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(cornerRadius));
+        var content = new FrameworkElementFactory(typeof(ContentPresenter));
+        content.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        content.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+        border.AppendChild(content);
+        return new ControlTemplate(typeof(Button)) { VisualTree = border };
+    }
+
+    private static ControlTemplate ItemTemplate()
+    {
+        var border = new FrameworkElementFactory(typeof(Border));
+        border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+        border.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
+        border.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Control.BorderThicknessProperty));
+        border.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Control.PaddingProperty));
+        var content = new FrameworkElementFactory(typeof(ContentPresenter));
+        border.AppendChild(content);
+        return new ControlTemplate(typeof(ListBoxItem)) { VisualTree = border };
+    }
+
     private Style FlatButtonStyle()
     {
         var style = new Style(typeof(Button));
+        style.Setters.Add(new Setter(Control.TemplateProperty, ButtonTemplate(3)));
         style.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(SurfaceKey)));
         style.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension(SecondaryTextKey)));
         style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
@@ -1012,12 +1048,16 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         var pressed = new Trigger { Property = Button.IsPressedProperty, Value = true };
         pressed.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(PressedKey)));
         style.Triggers.Add(pressed);
+        var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
+        disabled.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension(MutedTextKey)));
+        style.Triggers.Add(disabled);
         return style;
     }
 
     private Style ActiveSegmentStyle()
     {
         var style = new Style(typeof(Button));
+        style.Setters.Add(new Setter(Control.TemplateProperty, ButtonTemplate(3)));
         style.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(AccentKey)));
         style.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.White));
         style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
@@ -1027,6 +1067,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
     private Style ActivityItemStyle()
     {
         var style = new Style(typeof(ListBoxItem));
+        style.Setters.Add(new Setter(Control.TemplateProperty, ItemTemplate()));
         style.Setters.Add(new Setter(Control.BackgroundProperty, Brushes.Transparent));
         style.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension(TextKey)));
         style.Setters.Add(new Setter(Control.BorderBrushProperty, new DynamicResourceExtension(BorderKey)));

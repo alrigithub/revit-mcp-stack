@@ -108,8 +108,8 @@ public sealed class BridgeRuntime : IDisposable
         _bridgeButton.Enabled = State is BridgeState.On or BridgeState.Off;
         _bridgeButton.ItemText = State switch
         {
-            BridgeState.On => "Bridge On",
-            BridgeState.Off => "Bridge Off",
+            BridgeState.On => "Bridge\nOn",
+            BridgeState.Off => "Bridge\nOff",
             BridgeState.Starting => "Starting",
             _ => "Stopping"
         };
@@ -123,7 +123,7 @@ public sealed class BridgeRuntime : IDisposable
         var capability = Providers.Capability;
         var pythonOn = capability == "available";
         _pythonButton.Enabled = capability is "available" or "disabled" or "stale";
-        _pythonButton.ItemText = pythonOn ? "Python On" : "Python Off";
+        _pythonButton.ItemText = pythonOn ? "Python\nOn" : "Python\nOff";
         _pythonButton.LargeImage = LucideIcon.Create(LucideIcon.Code, pythonOn ? LucideIcon.Green : capability == "disabled" ? LucideIcon.Red : LucideIcon.Gray, 32, 1.25);
         _pythonButton.Image = LucideIcon.Create(LucideIcon.Code, pythonOn ? LucideIcon.Green : capability == "disabled" ? LucideIcon.Red : LucideIcon.Gray, 16, 1.75);
         _pythonButton.ToolTip = capability switch

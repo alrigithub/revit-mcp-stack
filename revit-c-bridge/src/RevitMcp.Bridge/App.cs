@@ -76,8 +76,8 @@ public sealed class App : IExternalApplication
         try { application.CreateRibbonTab(tab); } catch (Autodesk.Revit.Exceptions.ArgumentException) { }
         var panel = application.CreateRibbonPanel(tab, "Local Bridge");
         var assembly = Assembly.GetExecutingAssembly().Location;
-        var bridgeData = new PushButtonData("RevitMcp.Bridge.Toggle", "Bridge Off", assembly, typeof(BridgeToggleCommand).FullName!);
-        var pythonData = new PushButtonData("RevitMcp.Python.Toggle", "Python Off", assembly, typeof(PythonToggleCommand).FullName!);
+        var bridgeData = new PushButtonData("RevitMcp.Bridge.Toggle", "Bridge\nOff", assembly, typeof(BridgeToggleCommand).FullName!);
+        var pythonData = new PushButtonData("RevitMcp.Python.Toggle", "Python\nOff", assembly, typeof(PythonToggleCommand).FullName!);
         var activityData = new PushButtonData("RevitMcp.Bridge.Activity", "Activity", assembly, typeof(ActivityPaneCommand).FullName!);
         var settingsData = new PushButtonData("RevitMcp.Bridge.Settings", "Settings", assembly, typeof(SettingsCommand).FullName!);
         var bridge = (PushButton)panel.AddItem(bridgeData);
