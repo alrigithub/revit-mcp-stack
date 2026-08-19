@@ -17,7 +17,7 @@ public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventH
     private int _added, _modified, _deleted;
     private static readonly HashSet<string> UiTools = new(StringComparer.Ordinal) { "select_elements", "zoom_to_elements", "open_view" };
     private static readonly HashSet<string> ContextFreeTools = new(StringComparer.Ordinal) { "list_documents", "get_active_context", "reload_python_provider", "reload_tool_provider" };
-    public string GetName() => "Revit MCP bounded request dispatcher";
+    public string GetName() => "3XN-RevitMCP bounded request dispatcher";
 
     public void Execute(UIApplication app)
     {
@@ -171,10 +171,17 @@ public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventH
     {
         "list_documents" => new { documents = runtime.Documents.List(app), omitted_fields = Array.Empty<string>() },
         "get_active_context" => ActiveContext(app),
-        "reload_python_provider" => runtime.Providers.Reload(),
+        "reload_python_provider" => ReloadPythonProvider(),
         "reload_tool_provider" => runtime.Roslyn.Reload(),
         _ => throw new RequestDispatchException("unknown_tool", request.Admission.Tool)
     };
+
+    private object ReloadPythonProvider()
+    {
+        var result = runtime.Providers.Reload();
+        runtime.RefreshRibbon();
+        return result;
+    }
 
     // A closed document (EditFamily leftover, overnight session) can linger behind
     // ActiveUIDocument; touching its members throws InvalidObjectException, which
@@ -213,7 +220,7 @@ public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventH
     }
 
     private object ExecuteDynamic(Document document, RequestRecord request, Func<object> action) =>
-        _transactions.Execute(document, request.Admission.TransactionMode!, $"Revit MCP {request.Admission.Tool}", action);
+        _transactions.Execute(document, request.Admission.TransactionMode!, $"3XN-RevitMCP {request.Admission.Tool}", action);
 
     private object ExecutePython(UIApplication app, Document document, UIDocument? uidoc, RequestRecord request)
     {
@@ -239,14 +246,14 @@ public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventH
             var stepArgs = step.TryGetProperty("arguments", out var a) ? a : JsonSerializer.SerializeToElement(new { });
             return DispatchRaw(app, document, uidoc, request.Admission.RequestId + ":" + index, tool, stepArgs, request.Admission.ProviderGeneration);
         };
-        if (atomic) return _transactions.ExecuteAtomicBatch(document, $"Revit MCP batch {request.Admission.RequestId}", steps.Select(MakeStep).ToArray());
+        if (atomic) return _transactions.ExecuteAtomicBatch(document, $"3XN-RevitMCP batch {request.Admission.RequestId}", steps.Select(MakeStep).ToArray());
         var results = new List<object>();
         for (var index = 0; index < steps.Length; index++)
         {
             var mode = steps[index].TryGetProperty("transaction_mode", out var modeElement) ? modeElement.GetString() : null;
             if (mode is null) throw new RequestDispatchException("transaction_mode_required", "Every non-atomic batch step requires transaction_mode.");
             var action = MakeStep(steps[index], index);
-            try { results.Add(new { index, state = "succeeded", result = _transactions.Execute(document, mode, $"Revit MCP batch step {index + 1}", action) }); }
+            try { results.Add(new { index, state = "succeeded", result = _transactions.Execute(document, mode, $"3XN-RevitMCP batch step {index + 1}", action) }); }
             catch (Exception ex) { results.Add(new { index, state = "failed", error = Redaction.Error(ex) }); }
         }
         return new { atomic = false, steps = results };
@@ -259,7 +266,7 @@ public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventH
         var tool = action.GetProperty("tool").GetString()!;
         var actionArgs = action.GetProperty("arguments");
         var beforeWarnings = document.GetWarnings().Select(w => w.GetFailureDefinitionId().Guid).ToHashSet();
-        return _transactions.Execute(document, request.Admission.TransactionMode!, $"Revit MCP verify {request.Admission.Tool}", () =>
+        return _transactions.Execute(document, request.Admission.TransactionMode!, $"3XN-RevitMCP verify {request.Admission.Tool}", () =>
         {
             var result = DispatchRaw(app, document, uidoc, request.Admission.RequestId, tool, actionArgs, request.Admission.ProviderGeneration);
             var verifyIds = args.TryGetProperty("element_ids", out var ids) ? ids.EnumerateArray().Select(x => new ElementId(x.GetInt64())).ToArray() : [];

@@ -1,4 +1,4 @@
-# MCP Bridge Gotchas
+# 3XN-RevitMCP Bridge Gotchas
 
 Hard-won operational notes from live sessions. Read this before driving the bridge for real work.
 

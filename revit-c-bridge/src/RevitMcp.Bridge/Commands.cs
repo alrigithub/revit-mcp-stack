@@ -5,22 +5,34 @@ using Autodesk.Revit.UI;
 namespace RevitMcp.Bridge;
 
 [Transaction(TransactionMode.Manual)]
-public sealed class BridgeOnCommand : IExternalCommand
+public sealed class BridgeToggleCommand : IExternalCommand
 {
     public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
     {
-        try { BridgeRuntime.Require().Enable(); return Result.Succeeded; }
+        try
+        {
+            var runtime = BridgeRuntime.Require();
+            if (runtime.State == BridgeState.On) runtime.Disable(); else runtime.Enable();
+            return Result.Succeeded;
+        }
         catch (Exception ex) { message = ex.Message; return Result.Failed; }
     }
 }
 
 [Transaction(TransactionMode.Manual)]
-public sealed class BridgeOffCommand : IExternalCommand
+public sealed class PythonToggleCommand : IExternalCommand
 {
     public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
     {
-        try { BridgeRuntime.Require().Disable(); return Result.Succeeded; }
+        var runtime = BridgeRuntime.Require();
+        try
+        {
+            if (runtime.Providers.Capability == "available") runtime.Providers.SetEnabled(false);
+            else runtime.Providers.Reload();
+            return Result.Succeeded;
+        }
         catch (Exception ex) { message = ex.Message; return Result.Failed; }
+        finally { runtime.RefreshRibbon(); }
     }
 }
 

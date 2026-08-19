@@ -20,8 +20,8 @@ public sealed class BridgeRuntime : IDisposable
     private ExternalEvent? _externalEvent;
     private ExternalEventCoordinator? _coordinator;
     private PipeServer? _pipe;
-    private PushButton? _onButton;
-    private PushButton? _offButton;
+    private PushButton? _bridgeButton;
+    private PushButton? _pythonButton;
     private bool _disposed;
 
     private BridgeRuntime(string revitYear)
@@ -56,7 +56,7 @@ public sealed class BridgeRuntime : IDisposable
         _externalEvent = externalEvent;
         _coordinator = new ExternalEventCoordinator(new RevitEventRaiser(externalEvent), () => Queue.Count > 0);
     }
-    public void AttachButtons(PushButton on, PushButton off) { _onButton = on; _offButton = off; }
+    public void AttachButtons(PushButton bridge, PushButton python) { _bridgeButton = bridge; _pythonButton = python; }
 
     public void Enable()
     {
@@ -98,16 +98,41 @@ public sealed class BridgeRuntime : IDisposable
         pipe?.Dispose();
     }
 
+    // Both toggles show the CURRENT state; a click flips it. Ribbon updates must
+    // happen on the UI thread, which every caller (commands, handler, pyRevit
+    // startup registration) already is.
     public void RefreshRibbon()
     {
-        if (_onButton is null || _offButton is null) return;
-        var isOff = State == BridgeState.Off;
-        _onButton.Enabled = isOff;
-        _offButton.Enabled = State == BridgeState.On;
-        _onButton.ToolTip = $"Start the local Revit MCP bridge. Actual state: {State.ToString().ToUpperInvariant()}. Default: OFF each Revit session.";
-        _offButton.ToolTip = $"Stop admission and discovery; queued work is terminally cancelled. Actual state: {State.ToString().ToUpperInvariant()}.";
-        _onButton.LongDescription = $"Current bridge state is {State}. Named pipe is {(State == BridgeState.On ? PipeName : "not listening")}.";
-        _offButton.LongDescription = _onButton.LongDescription;
+        if (_bridgeButton is null || _pythonButton is null) return;
+        var on = State == BridgeState.On;
+        _bridgeButton.Enabled = State is BridgeState.On or BridgeState.Off;
+        _bridgeButton.ItemText = State switch
+        {
+            BridgeState.On => "Bridge On",
+            BridgeState.Off => "Bridge Off",
+            BridgeState.Starting => "Starting",
+            _ => "Stopping"
+        };
+        _bridgeButton.LargeImage = LucideIcon.Create(on ? LucideIcon.PlugZap : LucideIcon.Unplug, on ? LucideIcon.Green : LucideIcon.Red, 32, 1.25);
+        _bridgeButton.Image = LucideIcon.Create(on ? LucideIcon.PlugZap : LucideIcon.Unplug, on ? LucideIcon.Green : LucideIcon.Red, 16, 1.75);
+        _bridgeButton.ToolTip = on
+            ? "The bridge is on. Click to stop admission and discovery; queued work is cancelled."
+            : "The bridge is off. Click to start it. Starts off in every Revit session.";
+        _bridgeButton.LongDescription = $"Named pipe: {(on ? PipeName : "not listening")}.";
+
+        var capability = Providers.Capability;
+        var pythonOn = capability == "available";
+        _pythonButton.Enabled = capability is "available" or "disabled" or "stale";
+        _pythonButton.ItemText = pythonOn ? "Python On" : "Python Off";
+        _pythonButton.LargeImage = LucideIcon.Create(LucideIcon.Code, pythonOn ? LucideIcon.Green : capability == "disabled" ? LucideIcon.Red : LucideIcon.Gray, 32, 1.25);
+        _pythonButton.Image = LucideIcon.Create(LucideIcon.Code, pythonOn ? LucideIcon.Green : capability == "disabled" ? LucideIcon.Red : LucideIcon.Gray, 16, 1.75);
+        _pythonButton.ToolTip = capability switch
+        {
+            "available" => "The IronPython provider is on. Click to turn it off.",
+            "disabled" or "stale" => "The IronPython provider is off. Click to reload it from disk and turn it on.",
+            _ => "The pyRevit provider has not registered in this session. Install or enable the pyRevit extension, then restart Revit."
+        };
+        _pythonButton.LongDescription = $"Actual Python capability: {capability}.";
     }
 
     internal void NotifyWork() => _coordinator?.NotifyWork();

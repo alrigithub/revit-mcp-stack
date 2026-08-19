@@ -6,11 +6,15 @@ using System.Text.RegularExpressions;
 namespace RevitMcp.Bridge;
 
 internal sealed record LocalSettings(string SavedToolsRoot, List<string> SavedToolsPaths, HashSet<string> DisabledMcpTools,
-    bool BypassDialogs = true, bool AllowArbitraryCode = false, Dictionary<string, JsonElement>? Extra = null, string? Error = null)
+    bool BypassDialogs = true, bool AllowArbitraryCode = false, HashSet<string>? DisabledToolPaths = null,
+    Dictionary<string, JsonElement>? Extra = null, string? Error = null)
 {
     /// <summary>Ordered search roots: the primary (writable) root first, then saved_tools_paths, deduplicated.</summary>
     public IReadOnlyList<string> SearchRoots =>
         new[] { SavedToolsRoot }.Concat(SavedToolsPaths).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    public bool IsPathDisabled(string root) =>
+        DisabledToolPaths is not null && DisabledToolPaths.Contains(Path.GetFullPath(root));
 }
 
 internal static partial class LocalSettingsStore
@@ -48,7 +52,15 @@ internal static partial class LocalSettingsStore
                 if (disabledNames.Any(name => !ToolNamePattern().IsMatch(name)))
                     throw new InvalidDataException("disabled_mcp_tools contains an invalid tool name.");
                 var disabled = disabledNames.ToHashSet(StringComparer.Ordinal);
-                return new(root, paths, disabled, stored?.BypassDialogs ?? true, stored?.AllowArbitraryCode ?? false, stored?.Extra);
+                var disabledPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var entry in stored?.DisabledToolPaths ?? [])
+                {
+                    if (string.IsNullOrWhiteSpace(entry)) throw new InvalidDataException("disabled_tool_paths entries must be non-empty absolute paths.");
+                    var expanded = Environment.ExpandEnvironmentVariables(entry);
+                    if (!Path.IsPathFullyQualified(expanded)) throw new InvalidDataException("disabled_tool_paths entries must be absolute paths.");
+                    disabledPaths.Add(Path.GetFullPath(expanded));
+                }
+                return new(root, paths, disabled, stored?.BypassDialogs ?? true, stored?.AllowArbitraryCode ?? false, disabledPaths, stored?.Extra);
             }
             catch (Exception ex)
             {
@@ -78,6 +90,16 @@ internal static partial class LocalSettingsStore
         }
         var settings = Load();
         Save(settings with { SavedToolsPaths = paths.Distinct(StringComparer.OrdinalIgnoreCase).ToList() });
+    }
+
+    public static void SetToolPathEnabled(string path, bool enabled)
+    {
+        var full = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()));
+        var settings = Load();
+        var disabled = new HashSet<string>(settings.DisabledToolPaths ?? [], StringComparer.OrdinalIgnoreCase);
+        if (enabled) disabled.Remove(full);
+        else disabled.Add(full);
+        Save(settings with { DisabledToolPaths = disabled });
     }
 
     public static void SetBypassDialogs(bool enabled)
@@ -147,7 +169,7 @@ internal static partial class LocalSettingsStore
         {
             Directory.CreateDirectory(BaseRoot);
             var stored = new StoredSettings(settings.SavedToolsRoot, settings.SavedToolsPaths, settings.DisabledMcpTools.Order().ToList(),
-                settings.BypassDialogs, settings.AllowArbitraryCode) { Extra = settings.Extra };
+                settings.BypassDialogs, settings.AllowArbitraryCode, settings.DisabledToolPaths?.Order().ToList()) { Extra = settings.Extra };
             var staging = SettingsPath + ".tmp";
             File.WriteAllText(staging, JsonSerializer.Serialize(stored, JsonOptions));
             File.Move(staging, SettingsPath, true);
@@ -161,7 +183,8 @@ internal static partial class LocalSettingsStore
         [property: JsonPropertyName("saved_tools_paths")] List<string>? SavedToolsPaths,
         [property: JsonPropertyName("disabled_mcp_tools")] List<string>? DisabledMcpTools,
         [property: JsonPropertyName("bypass_dialogs")] bool? BypassDialogs = null,
-        [property: JsonPropertyName("allow_arbitrary_code")] bool? AllowArbitraryCode = null)
+        [property: JsonPropertyName("allow_arbitrary_code")] bool? AllowArbitraryCode = null,
+        [property: JsonPropertyName("disabled_tool_paths")] List<string>? DisabledToolPaths = null)
     {
         [JsonExtensionData]
         public Dictionary<string, JsonElement>? Extra { get; init; }

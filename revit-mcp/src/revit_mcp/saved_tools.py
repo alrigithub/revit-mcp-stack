@@ -72,6 +72,8 @@ def _manifest_path(tool_id: str, root: Path) -> Path:
 
 
 def _disabled_state(manifest_path: Path, root: Path) -> tuple[bool, str | None]:
+    if load_settings().is_path_disabled(root):
+        return False, "path disabled"
     tool_marker = manifest_path.with_suffix(".disabled")
     if tool_marker.is_file():
         return False, "tool disabled"

@@ -14,6 +14,7 @@ internal static class CodeGate
         var normalized = Normalize(source);
         foreach (var root in settings.SearchRoots)
         {
+            if (settings.IsPathDisabled(root)) continue;
             foreach (var script in SafeEnumerate(root, "*" + extension))
             {
                 if (!File.Exists(Path.ChangeExtension(script, ".json"))) continue;

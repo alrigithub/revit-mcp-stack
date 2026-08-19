@@ -19,7 +19,7 @@ public sealed class App : IExternalApplication
             var handler = new RevitRequestHandler(runtime);
             runtime.AttachExternalEvent(ExternalEvent.Create(handler));
             _activityPane = new ActivityPane(runtime);
-            application.RegisterDockablePane(ActivityPane.PaneId, "Revit MCP Activity", _activityPane);
+            application.RegisterDockablePane(ActivityPane.PaneId, "3XN-RevitMCP Activity", _activityPane);
             application.Idling += OnIdling;
             application.ThemeChanged += OnThemeChanged;
             CreateRibbon(application, runtime);
@@ -27,7 +27,7 @@ public sealed class App : IExternalApplication
         }
         catch (Exception ex)
         {
-            TaskDialog.Show("Revit MCP", $"Bridge startup failed: {ex.Message}");
+            TaskDialog.Show("3XN-RevitMCP", $"Bridge startup failed: {ex.Message}");
             return Result.Failed;
         }
     }
@@ -72,34 +72,26 @@ public sealed class App : IExternalApplication
 
     private static void CreateRibbon(UIControlledApplication application, BridgeRuntime runtime)
     {
-        const string tab = "Revit MCP";
+        const string tab = "3XN-RevitMCP";
         try { application.CreateRibbonTab(tab); } catch (Autodesk.Revit.Exceptions.ArgumentException) { }
         var panel = application.CreateRibbonPanel(tab, "Local Bridge");
         var assembly = Assembly.GetExecutingAssembly().Location;
-        var onData = new PushButtonData("RevitMcp.Bridge.On", "Bridge ON", assembly, typeof(BridgeOnCommand).FullName!);
-        var offData = new PushButtonData("RevitMcp.Bridge.Off", "Bridge OFF", assembly, typeof(BridgeOffCommand).FullName!);
+        var bridgeData = new PushButtonData("RevitMcp.Bridge.Toggle", "Bridge Off", assembly, typeof(BridgeToggleCommand).FullName!);
+        var pythonData = new PushButtonData("RevitMcp.Python.Toggle", "Python Off", assembly, typeof(PythonToggleCommand).FullName!);
         var activityData = new PushButtonData("RevitMcp.Bridge.Activity", "Activity", assembly, typeof(ActivityPaneCommand).FullName!);
         var settingsData = new PushButtonData("RevitMcp.Bridge.Settings", "Settings", assembly, typeof(SettingsCommand).FullName!);
-        var on = (PushButton)panel.AddItem(onData);
-        var off = (PushButton)panel.AddItem(offData);
+        var bridge = (PushButton)panel.AddItem(bridgeData);
+        var python = (PushButton)panel.AddItem(pythonData);
         panel.AddSeparator();
         var activity = (PushButton)panel.AddItem(activityData);
         var settings = (PushButton)panel.AddItem(settingsData);
-        var green = Color.FromRgb(67, 190, 105);
-        var red = Color.FromRgb(220, 101, 101);
-        var blue = Color.FromRgb(74, 157, 216);
-        var gray = Color.FromRgb(150, 158, 170);
-        on.LargeImage = LucideIcon.Create(LucideIcon.PlugZap, green, 32, 1.25);
-        on.Image = LucideIcon.Create(LucideIcon.PlugZap, green, 16, 1.75);
-        off.LargeImage = LucideIcon.Create(LucideIcon.Unplug, red, 32, 1.25);
-        off.Image = LucideIcon.Create(LucideIcon.Unplug, red, 16, 1.75);
-        activity.LargeImage = LucideIcon.Create(LucideIcon.Activity, blue, 32, 1.25);
-        activity.Image = LucideIcon.Create(LucideIcon.Activity, blue, 16, 1.75);
-        activity.ToolTip = "Show or hide local Revit MCP bridge activity.";
-        settings.LargeImage = LucideIcon.Create(LucideIcon.Settings, gray, 32, 1.25);
-        settings.Image = LucideIcon.Create(LucideIcon.Settings, gray, 16, 1.75);
-        settings.ToolTip = "Execution policy (dialog bypass, arbitrary code) and saved-tool locations.";
-        runtime.AttachButtons(on, off);
+        activity.LargeImage = LucideIcon.Create(LucideIcon.Activity, LucideIcon.Blue, 32, 1.25);
+        activity.Image = LucideIcon.Create(LucideIcon.Activity, LucideIcon.Blue, 16, 1.75);
+        activity.ToolTip = "Show or hide the 3XN-RevitMCP Activity pane.";
+        settings.LargeImage = LucideIcon.Create(LucideIcon.Settings, LucideIcon.Gray, 32, 1.25);
+        settings.Image = LucideIcon.Create(LucideIcon.Settings, LucideIcon.Gray, 16, 1.75);
+        settings.ToolTip = "Execution policy and saved-tool locations.";
+        runtime.AttachButtons(bridge, python);
         runtime.RefreshRibbon();
     }
 }
@@ -139,22 +131,42 @@ internal static class LucideIcon
         "M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
     ];
 
+    public static readonly string[] Code =
+    [
+        "M16 18 22 12 16 6",
+        "M8 6 2 12 8 18",
+    ];
+
+    public static readonly Color Green = Color.FromRgb(67, 190, 105);
+    public static readonly Color Red = Color.FromRgb(220, 101, 101);
+    public static readonly Color Blue = Color.FromRgb(74, 157, 216);
+    public static readonly Color Gray = Color.FromRgb(150, 158, 170);
+
+    // The transparent backing rect pins the image bounds to the full slot so
+    // Revit does not rescale the artwork.
+    private const double Inset = 1.0;
+
     public static ImageSource Create(string[] pathData, Color color, double size, double strokePx)
     {
-        var pen = new Pen(new SolidColorBrush(color), strokePx * 24.0 / size)
+        var pen = new Pen(new SolidColorBrush(color), strokePx * 24.0 / (size * Inset))
         {
             StartLineCap = PenLineCap.Round,
             EndLineCap = PenLineCap.Round,
             LineJoin = PenLineJoin.Round,
         };
         pen.Freeze();
-        var group = new DrawingGroup();
-        group.Children.Add(new GeometryDrawing(Brushes.Transparent, null, new RectangleGeometry(new System.Windows.Rect(0, 0, 24, 24))));
+        var glyph = new DrawingGroup();
         foreach (var data in pathData)
-            group.Children.Add(new GeometryDrawing(null, pen, Geometry.Parse(data)));
-        group.Transform = new ScaleTransform(size / 24.0, size / 24.0);
-        group.Freeze();
-        var image = new DrawingImage(group);
+            glyph.Children.Add(new GeometryDrawing(null, pen, Geometry.Parse(data)));
+        var transform = new TransformGroup();
+        transform.Children.Add(new ScaleTransform(size * Inset / 24.0, size * Inset / 24.0));
+        transform.Children.Add(new TranslateTransform(size * (1 - Inset) / 2.0, size * (1 - Inset) / 2.0));
+        glyph.Transform = transform;
+        var icon = new DrawingGroup();
+        icon.Children.Add(new GeometryDrawing(Brushes.Transparent, null, new RectangleGeometry(new System.Windows.Rect(0, 0, size, size))));
+        icon.Children.Add(glyph);
+        icon.Freeze();
+        var image = new DrawingImage(icon);
         image.Freeze();
         return image;
     }

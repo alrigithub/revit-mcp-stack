@@ -22,8 +22,24 @@ public sealed class PythonProviderDescriptor
 
 public static class PythonRegistrationService
 {
-    public static void Register(PythonProviderDescriptor descriptor, PythonCompileDelegate compiler, PythonExecuteDelegate executor, Action reload) => BridgeRuntime.Require().Providers.Register(descriptor, compiler, executor, reload);
-    public static void SetEnabled(bool enabled) => BridgeRuntime.Require().Providers.SetEnabled(enabled);
+    // Registration is the critical action; the ribbon refresh is cosmetic and can
+    // run outside a Revit API context (pyRevit loader), so it must never throw
+    // back into the caller.
+    public static void Register(PythonProviderDescriptor descriptor, PythonCompileDelegate compiler, PythonExecuteDelegate executor, Action reload)
+    {
+        BridgeRuntime.Require().Providers.Register(descriptor, compiler, executor, reload);
+        TryRefreshRibbon();
+    }
+    public static void SetEnabled(bool enabled)
+    {
+        BridgeRuntime.Require().Providers.SetEnabled(enabled);
+        TryRefreshRibbon();
+    }
+    private static void TryRefreshRibbon()
+    {
+        try { BridgeRuntime.Current?.RefreshRibbon(); }
+        catch (Exception ex) { BridgeRuntime.Current?.Log.Add(new(DateTimeOffset.UtcNow, null, null, "ribbon_refresh_failed", null, null, null, null, null, RevitMcp.Core.Redaction.Error(ex))); }
+    }
     public static string GetStatusJson() => System.Text.Json.JsonSerializer.Serialize(BridgeRuntime.Require().Providers.Status());
 }
 

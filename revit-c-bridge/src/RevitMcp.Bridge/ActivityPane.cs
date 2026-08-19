@@ -41,6 +41,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
     private readonly Button _savedButton = new();
     private readonly Button _clearButton = new();
     private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _collapsed = new(StringComparer.OrdinalIgnoreCase);
     private UITheme? _appliedTheme;
     private string? _lastDocumentTitle;
     private IReadOnlyList<string> _openDocuments = [];
@@ -133,9 +134,10 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         _queue.Visibility = queued > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         var pyrevit = _runtime.Providers.PyRevitVersion;
-        _environment.Text = "MCP v" + BridgeRuntime.ProductVersion + " · Revit " + _runtime.RevitYear
-            + (pyrevit is null ? "" : " · pyRevit " + ShortVersion(pyrevit));
-        _environment.ToolTip = pyrevit is null ? "pyRevit provider has not registered in this session." : null;
+        _environment.Text = "3XN-RevitMCP v" + BridgeRuntime.ProductVersion + " · updated " + InstallStamp
+            + " · Revit " + _runtime.RevitYear + (pyrevit is null ? "" : " · pyRevit " + ShortVersion(pyrevit));
+        _environment.ToolTip = "Bridge: this Revit add-in. Server: the Python MCP process your AI client starts. pyRevit provider: the IronPython runtime behind the Python toggle."
+            + (pyrevit is null ? " The pyRevit provider has not registered in this session." : "");
 
         if (_view == PaneView.Tools)
         {
@@ -237,7 +239,10 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         _activity.FontSize = 11;
         _activity.ItemContainerStyle = ActivityItemStyle();
         _activity.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
-        _activity.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+        // Space for the scrollbar is always reserved so content never shifts when
+        // it appears; the thin themed style keeps the idle track unobtrusive.
+        _activity.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Visible);
+        _activity.Resources[typeof(System.Windows.Controls.Primitives.ScrollBar)] = ScrollBarStyle();
         Grid.SetRow(_activity, 2);
         root.Children.Add(_activity);
 
@@ -616,25 +621,19 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         _savedCount = allManifests.Length;
 
         _activity.Items.Clear();
-        var shown = 0;
+        var settings = LocalSettingsStore.Load();
+        var total = 0;
         foreach (var root in roots)
         {
             var manifests = manifestsByRoot[root];
-            if (roots.Count > 1)
-            {
-                var header = new ListBoxItem { IsHitTestVisible = false };
-                var label = ThemedText(root, SecondaryTextKey);
-                label.TextWrapping = TextWrapping.Wrap;
-                label.Margin = new Thickness(4, 8, 4, 2);
-                header.Content = label;
-                _activity.Items.Add(header);
-            }
+            total += manifests.Length;
+            var pathEnabled = !settings.IsPathDisabled(root);
+            var rootCollapsed = _collapsed.Contains("path:" + root);
+            _activity.Items.Add(RootPathItem(root, manifests.Length, pathEnabled, rootCollapsed));
+            if (rootCollapsed) continue;
             foreach (var path in manifests.Where(path => string.Equals(System.IO.Path.GetDirectoryName(path), root, StringComparison.OrdinalIgnoreCase))
                          .OrderBy(System.IO.Path.GetFileName))
-            {
-                _activity.Items.Add(SavedItem(root, path, ReadSavedManifest(path)));
-                shown++;
-            }
+                _activity.Items.Add(SavedItem(root, path, ReadSavedManifest(path), pathEnabled, level: 1));
 
             var groupSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var manifestPath in manifests)
@@ -650,17 +649,17 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
                 .OrderBy(directory => System.IO.Path.GetRelativePath(root, directory), StringComparer.OrdinalIgnoreCase);
             foreach (var group in groups)
             {
-                _activity.Items.Add(SavedGroupItem(root, group));
-                foreach (var path in manifests.Where(path => string.Equals(System.IO.Path.GetDirectoryName(path), group, StringComparison.OrdinalIgnoreCase))
-                             .OrderBy(System.IO.Path.GetFileName))
-                {
-                    _activity.Items.Add(SavedItem(root, path, ReadSavedManifest(path)));
-                    shown++;
-                }
+                var members = manifests.Where(path => string.Equals(System.IO.Path.GetDirectoryName(path), group, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(System.IO.Path.GetFileName).ToArray();
+                var groupCollapsed = _collapsed.Contains("group:" + group);
+                _activity.Items.Add(SavedGroupItem(root, group, members.Length, pathEnabled, groupCollapsed));
+                if (groupCollapsed) continue;
+                foreach (var path in members)
+                    _activity.Items.Add(SavedItem(root, path, ReadSavedManifest(path), pathEnabled, level: 2));
             }
         }
-        _totals.Text = shown == 0 ? "" : shown + " saved tools";
-        if (shown == 0)
+        _totals.Text = total == 0 ? "" : total + " saved tools";
+        if (total == 0)
         {
             _activity.Items.Clear();
             var item = new ListBoxItem();
@@ -672,39 +671,109 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         }
     }
 
+    private void ToggleCollapsed(string key)
+    {
+        if (!_collapsed.Add(key)) _collapsed.Remove(key);
+        _savedCount = -1;
+        RefreshSaved();
+    }
+
+    // Roots render as the strongest band: full path in normal case, count, and a
+    // pill that disables every tool under the path at once. Click collapses it.
+    private ListBoxItem RootPathItem(string root, int toolCount, bool pathEnabled, bool collapsed)
+    {
+        var item = new ListBoxItem { Style = GroupItemStyle() };
+        var line = new Grid { Background = Brushes.Transparent };
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        line.ColumnDefinitions.Add(new ColumnDefinition());
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.Children.Add(ThemedText(collapsed ? "▸" : "▾", MutedTextKey));
+        var label = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, ToolTip = root };
+        var name = new System.Windows.Documents.Run(root) { FontWeight = FontWeights.SemiBold };
+        name.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, pathEnabled ? TextKey : MutedTextKey);
+        label.Inlines.Add(name);
+        var count = new System.Windows.Documents.Run("   " + toolCount + (toolCount == 1 ? " tool" : " tools")) { FontSize = 10 };
+        count.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, MutedTextKey);
+        label.Inlines.Add(count);
+        Grid.SetColumn(label, 1);
+        line.Children.Add(label);
+        var pill = StatePill(pathEnabled, pathEnabled ? "Enabled" : "Disabled");
+        pill.ToolTip = pathEnabled
+            ? "Click to disable every tool in this path. Takes effect on the next call."
+            : "Click to enable this path again.";
+        pill.Click += (_, _) =>
+        {
+            LocalSettingsStore.SetToolPathEnabled(root, !pathEnabled);
+            _savedCount = -1;
+            RefreshSaved();
+        };
+        Grid.SetColumn(pill, 2);
+        line.Children.Add(pill);
+        line.MouseLeftButtonUp += (_, _) => ToggleCollapsed("path:" + root);
+        item.Content = line;
+        return item;
+    }
+
     private static SavedManifest? ReadSavedManifest(string path)
     {
         try { return System.Text.Json.JsonSerializer.Deserialize<SavedManifest>(File.ReadAllText(path)); }
         catch { return null; }
     }
 
-    private ListBoxItem SavedGroupItem(string root, string directory)
+    // Groups render as full-width section bands (distinct background, uppercase
+    // label, tool count) so they cannot be mistaken for tools. Click collapses.
+    private ListBoxItem SavedGroupItem(string root, string directory, int toolCount, bool pathEnabled, bool collapsed)
     {
-        var item = new ListBoxItem();
-        var line = new Grid();
+        var item = new ListBoxItem { Style = GroupItemStyle() };
+        var line = new Grid { Background = Brushes.Transparent };
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         line.ColumnDefinitions.Add(new ColumnDefinition());
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.Children.Add(ThemedText(collapsed ? "▸" : "▾", MutedTextKey));
         var relative = System.IO.Path.GetRelativePath(root, directory).Replace(System.IO.Path.DirectorySeparatorChar, '/');
-        var inheritedEnabled = LocalSettingsStore.GroupsEnabled(root, Directory.GetParent(directory)?.FullName ?? root);
+        var inheritedEnabled = pathEnabled && LocalSettingsStore.GroupsEnabled(root, Directory.GetParent(directory)?.FullName ?? root);
         var directlyEnabled = !File.Exists(System.IO.Path.Combine(directory, ".disabled"));
-        var name = ThemedText(relative, directlyEnabled && inheritedEnabled ? TextKey : MutedTextKey);
-        name.FontWeight = FontWeights.SemiBold;
-        line.Children.Add(name);
-        var pill = StatePill(directlyEnabled && inheritedEnabled, !inheritedEnabled ? "Group off" : directlyEnabled ? "Enabled" : "Disabled");
+        var label = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        var name = new System.Windows.Documents.Run(relative.ToUpperInvariant()) { FontWeight = FontWeights.SemiBold };
+        name.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, directlyEnabled && inheritedEnabled ? SecondaryTextKey : MutedTextKey);
+        label.Inlines.Add(name);
+        var count = new System.Windows.Documents.Run("   " + toolCount + (toolCount == 1 ? " tool" : " tools"));
+        count.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, MutedTextKey);
+        count.FontSize = 10;
+        label.Inlines.Add(count);
+        Grid.SetColumn(label, 1);
+        line.Children.Add(label);
+        var pill = StatePill(directlyEnabled && inheritedEnabled,
+            !pathEnabled ? "Path off" : !inheritedEnabled ? "Group off" : directlyEnabled ? "Enabled" : "Disabled");
         pill.IsEnabled = inheritedEnabled;
-        pill.ToolTip = !inheritedEnabled
-            ? "A parent group is disabled; enable it first."
-            : "Applies to every tool in this group. Takes effect on the next call.";
+        pill.ToolTip = !pathEnabled
+            ? "The whole path is disabled; enable the path first."
+            : !inheritedEnabled
+                ? "A parent group is disabled; enable it first."
+                : "Applies to every tool in this group. Takes effect on the next call.";
         pill.Click += (_, _) =>
         {
             LocalSettingsStore.SetGroupEnabled(directory, !directlyEnabled);
             _savedCount = -1;
             RefreshSaved();
         };
-        Grid.SetColumn(pill, 1);
+        Grid.SetColumn(pill, 2);
         line.Children.Add(pill);
+        line.MouseLeftButtonUp += (_, _) => ToggleCollapsed("group:" + directory);
         item.Content = line;
         return item;
+    }
+
+    private Style GroupItemStyle()
+    {
+        var style = new Style(typeof(ListBoxItem));
+        style.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(SectionKey)));
+        style.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension(SecondaryTextKey)));
+        style.Setters.Add(new Setter(Control.BorderBrushProperty, new DynamicResourceExtension(BorderKey)));
+        style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0, 1, 0, 1)));
+        style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(6, 5, 4, 5)));
+        style.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        return style;
     }
 
     private Button StatePill(bool enabled, string text) => new()
@@ -735,13 +804,14 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         return style;
     }
 
-    private ListBoxItem SavedItem(string root, string manifestPath, SavedManifest? manifest)
+    private ListBoxItem SavedItem(string root, string manifestPath, SavedManifest? manifest, bool pathEnabled = true, int level = 0)
     {
         var item = new ListBoxItem();
         var panel = new StackPanel();
+        if (level > 0) panel.Margin = new Thickness(8 * level, 0, 0, 0);
         if (manifest?.Name is null)
         {
-            var broken = ThemedText(System.IO.Path.GetRelativePath(root, manifestPath) + " — invalid manifest", ErrorKey);
+            var broken = ThemedText("Invalid manifest: " + System.IO.Path.GetRelativePath(root, manifestPath), ErrorKey);
             broken.TextWrapping = TextWrapping.Wrap;
             panel.Children.Add(broken);
             item.Content = panel;
@@ -755,7 +825,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         line.ColumnDefinitions.Add(new ColumnDefinition());
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var groupsEnabled = LocalSettingsStore.GroupsEnabled(root, System.IO.Path.GetDirectoryName(manifestPath)!);
+        var groupsEnabled = pathEnabled && LocalSettingsStore.GroupsEnabled(root, System.IO.Path.GetDirectoryName(manifestPath)!);
         var directlyEnabled = !File.Exists(System.IO.Path.ChangeExtension(manifestPath, ".disabled"));
         line.Children.Add(ThemedText(expanded ? "▾" : "▸", MutedTextKey));
         var name = ThemedText(manifest.Name, groupsEnabled && directlyEnabled ? TextKey : MutedTextKey);
@@ -769,11 +839,14 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         meta.Margin = new Thickness(8, 0, 0, 0);
         Grid.SetColumn(meta, 2);
         line.Children.Add(meta);
-        var pill = StatePill(groupsEnabled && directlyEnabled, !groupsEnabled ? "Group off" : directlyEnabled ? "Enabled" : "Disabled");
+        var pill = StatePill(groupsEnabled && directlyEnabled,
+            !pathEnabled ? "Path off" : !groupsEnabled ? "Group off" : directlyEnabled ? "Enabled" : "Disabled");
         pill.IsEnabled = groupsEnabled;
-        pill.ToolTip = !groupsEnabled
-            ? "A parent group is disabled; enable the group to use this tool."
-            : directlyEnabled ? "Click to disable this saved tool. Takes effect on the next call." : "Click to enable this saved tool. Takes effect on the next call.";
+        pill.ToolTip = !pathEnabled
+            ? "The whole path is disabled; enable the path to use this tool."
+            : !groupsEnabled
+                ? "A parent group is disabled; enable the group to use this tool."
+                : directlyEnabled ? "Click to disable this saved tool. Takes effect on the next call." : "Click to enable this saved tool. Takes effect on the next call.";
         pill.Click += (_, _) =>
         {
             LocalSettingsStore.SetSavedToolEnabled(manifestPath, !directlyEnabled);
@@ -819,7 +892,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
             }
             else
             {
-                var none = ThemedText("No parameters — runs as-is.", MutedTextKey);
+                var none = ThemedText("No parameters. Runs as it is.", MutedTextKey);
                 none.FontSize = 10;
                 none.Margin = new Thickness(18, 1, 0, 0);
                 panel.Children.Add(none);
@@ -860,6 +933,18 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         return trimmed.Length > 16 ? trimmed[..16] : trimmed;
     }
 
+    // When the loaded bridge DLL was written to disk, i.e. when it was last installed.
+    private static readonly string InstallStamp = ComputeInstallStamp();
+    private static string ComputeInstallStamp()
+    {
+        try
+        {
+            return File.GetLastWriteTime(typeof(BridgeRuntime).Assembly.Location)
+                .ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch { return "unknown"; }
+    }
+
     private ListBoxItem EmptyActivityItem()
     {
         var item = new ListBoxItem();
@@ -867,6 +952,51 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         message.Margin = new Thickness(4, 8, 4, 8);
         item.Content = message;
         return item;
+    }
+
+    // Thin Revit-style scrollbar: 8px, no arrow buttons, rounded themed thumb.
+    private static Style ScrollBarStyle()
+    {
+        const string xaml = """
+<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+       TargetType="ScrollBar">
+  <Setter Property="Width" Value="8"/>
+  <Setter Property="MinWidth" Value="8"/>
+  <Setter Property="Background" Value="Transparent"/>
+  <Setter Property="Template">
+    <Setter.Value>
+      <ControlTemplate TargetType="ScrollBar">
+        <Grid Background="Transparent">
+          <Track x:Name="PART_Track" IsDirectionReversed="True">
+            <Track.DecreaseRepeatButton>
+              <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False" IsTabStop="False"/>
+            </Track.DecreaseRepeatButton>
+            <Track.IncreaseRepeatButton>
+              <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False" IsTabStop="False"/>
+            </Track.IncreaseRepeatButton>
+            <Track.Thumb>
+              <Thumb>
+                <Thumb.Template>
+                  <ControlTemplate TargetType="Thumb">
+                    <Border x:Name="ThumbBody" Background="{DynamicResource RevitMcp.Border}" CornerRadius="3" Margin="1"/>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="ThumbBody" Property="Background" Value="{DynamicResource RevitMcp.MutedText}"/>
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </Thumb.Template>
+              </Thumb>
+            </Track.Thumb>
+          </Track>
+        </Grid>
+      </ControlTemplate>
+    </Setter.Value>
+  </Setter>
+</Style>
+""";
+        return (Style)XamlReader.Parse(xaml);
     }
 
     private Style FlatButtonStyle()

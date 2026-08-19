@@ -1,6 +1,6 @@
 {
   "name": "RevitMCP",
-  "description": "Persistent IronPython execution provider for the direct Revit MCP bridge.",
+  "description": "Persistent IronPython execution provider for the 3XN-RevitMCP bridge.",
   "author": "Local",
   "author_profile": "",
   "url": "",

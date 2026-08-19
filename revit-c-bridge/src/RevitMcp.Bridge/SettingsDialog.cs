@@ -28,7 +28,7 @@ public sealed class SettingsDialog : Window
         catch { theme = UITheme.Dark; }
         _palette = theme == UITheme.Light ? RevitPalette.Light : RevitPalette.Dark;
 
-        Title = "Revit MCP Settings";
+        Title = "3XN-RevitMCP Settings";
         Width = 480;
         SizeToContent = SizeToContent.Height;
         ResizeMode = ResizeMode.NoResize;
@@ -44,18 +44,18 @@ public sealed class SettingsDialog : Window
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         root.Children.Add(SectionTitle("Execution policy", first: true));
-        root.Children.Add(Note("Changes apply to the next bridge call immediately."));
+        root.Children.Add(Note("Changes apply on the next call."));
         root.Children.Add(Toggle(
-            "Bypass Revit dialogs during bridge calls",
-            "Warnings are committed and logged, blocking errors roll the call back, and popups are answered automatically so a dialog can never freeze the bridge queue. Turn off to see stock Revit dialogs (a popup then blocks the queue until dismissed).",
+            "Bypass Revit dialogs",
+            "Answers popups automatically and logs them so calls never freeze. Turn off to get stock Revit dialogs.",
             settings.BypassDialogs, LocalSettingsStore.SetBypassDialogs));
         root.Children.Add(Toggle(
-            "Allow arbitrary code (run_python / run_csharp)",
-            "Lets AI agents execute newly written scripts. When off, only enabled saved tools on disk can run — agents keep run_saved_tool and every read-only bridge tool.",
+            "Allow arbitrary code",
+            "Lets AI agents run newly written scripts. When off, only saved tools can run.",
             settings.AllowArbitraryCode, LocalSettingsStore.SetAllowArbitraryCode));
 
         root.Children.Add(SectionTitle("Saved tools folder"));
-        root.Children.Add(Note("Primary, writable location for saved tools. Agents read it via list_saved_tools before creating files."));
+        root.Children.Add(Note("Writable folder where agents create saved tools."));
         var rootRow = new DockPanel { Margin = new Thickness(0, 2, 0, 0) };
         var saveRoot = ActionButton("Save");
         saveRoot.Margin = new Thickness(8, 0, 0, 0);
@@ -73,7 +73,7 @@ public sealed class SettingsDialog : Window
         root.Children.Add(rootRow);
 
         root.Children.Add(SectionTitle("Extra tool paths"));
-        root.Children.Add(Note("Read-only roots searched after the primary folder, in order. On duplicate tool IDs the first root wins; subfolders are groups."));
+        root.Children.Add(Note("Read-only folders searched after the primary, in order. First match wins."));
         _paths.Height = 84;
         _paths.BorderThickness = new Thickness(1);
         _paths.BorderBrush = Brush(_palette.Border);
@@ -121,8 +121,12 @@ public sealed class SettingsDialog : Window
         addRow.Children.Add(_newPathBox);
         root.Children.Add(addRow);
 
+        var components = Note("Bridge: this Revit add-in. Server: the Python MCP process your AI client starts. pyRevit provider: the IronPython runtime behind the Python toggle.");
+        components.Margin = new Thickness(0, 12, 0, 0);
+        root.Children.Add(components);
+
         _status.FontSize = 10;
-        _status.Margin = new Thickness(0, 10, 0, 0);
+        _status.Margin = new Thickness(0, 8, 0, 0);
         _status.TextWrapping = TextWrapping.Wrap;
         _status.Foreground = Brush(_palette.MutedText);
         if (settings.Error is not null)

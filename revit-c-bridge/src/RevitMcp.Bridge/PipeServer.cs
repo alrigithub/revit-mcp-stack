@@ -99,7 +99,7 @@ public sealed class PipeServer : IDisposable
             {
                 if (CodeGate.IsVetted(settings, dynamicTool, dynamicSource)) continue;
                 return Error(request.RequestId, "arbitrary_code_disabled",
-                    "Arbitrary code is disabled on this machine; only enabled saved tools may run. Use run_saved_tool, or an operator can enable 'Allow arbitrary code' in Revit MCP Settings on the ribbon.");
+                    "Arbitrary code is disabled on this machine; only enabled saved tools may run. Use run_saved_tool, or an operator can enable 'Allow arbitrary code' in 3XN-RevitMCP Settings on the ribbon.");
             }
         }
 

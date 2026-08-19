@@ -126,7 +126,11 @@ def register_provider(enabled):
     descriptor.SelfTestMessage = message
 
     def reload_delegate():
-        register_provider(True)
+        # The persistent engine caches modules; re-read the on-disk source so the
+        # ribbon Python toggle (and reload_python_provider) pick up provider edits.
+        import revit_mcp_provider
+        reload(revit_mcp_provider)
+        revit_mcp_provider.register_provider(True)
 
     Registration.Register(descriptor, PythonCompileDelegate(_prepare), PythonExecuteDelegate(_execute), Action(reload_delegate))
     return descriptor.ProviderGeneration

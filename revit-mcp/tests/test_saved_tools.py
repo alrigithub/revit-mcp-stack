@@ -141,6 +141,27 @@ class SavedToolsTests(unittest.TestCase):
                 with self.assertRaises(PermissionError):
                     load_saved_tool("shared")
 
+    def test_disabled_path_disables_every_tool_in_that_root(self):
+        import os
+        with tempfile.TemporaryDirectory() as folder:
+            primary = Path(folder) / "primary"
+            extra = Path(folder) / "extra"
+            primary.mkdir()
+            extra.mkdir()
+            write_tool(primary, "keeper", manifest("keeper"))
+            write_tool(extra, "banned", manifest("banned"))
+            disabled = frozenset({os.path.normcase(os.path.normpath(str(extra)))})
+            fake = RuntimeSettings(Path("settings.json"), primary, frozenset(),
+                                   saved_tools_paths=(extra,), disabled_tool_paths=disabled)
+            with patch("revit_mcp.saved_tools.load_settings", return_value=fake):
+                listing = {tool["id"]: tool for tool in list_saved_tools()["tools"]}
+                self.assertTrue(listing["keeper"]["enabled"])
+                self.assertFalse(listing["banned"]["enabled"])
+                self.assertEqual("path disabled", listing["banned"]["disabled_reason"])
+                with self.assertRaises(PermissionError):
+                    load_saved_tool("banned")
+                self.assertEqual("keeper", load_saved_tool("keeper").id)
+
     def test_missing_extra_root_is_skipped(self):
         with tempfile.TemporaryDirectory() as folder:
             primary = Path(folder) / "primary"
