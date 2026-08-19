@@ -1,8 +1,8 @@
 # saved-tools
 
-Prebuilt saved tools for the Revit MCP stack. A saved tool is a proven script promoted to a named MCP tool: the assistant calls it through `run_saved_tool` instead of pasting the script into `run_python` every time. No rebuild, no reconnect — the files on disk are the tool.
+Prebuilt saved tools for 3XN-RevitMCP. A saved tool is a proven script promoted to a named MCP tool: the assistant calls it through `run_saved_tool` instead of pasting the script into `run_python` every time. No rebuild, no reconnect — the files on disk are the tool.
 
-This folder is the repo copy. Tools only run from the deployed root, `%LOCALAPPDATA%\RevitMcp\tools\` by default (change it in **Activity → Settings**).
+This folder is the repo copy. Tools only run from the deployed root, `%LOCALAPPDATA%\RevitMcp\tools\` by default (change it in the ribbon **Settings** dialog).
 
 ## Deploy
 
@@ -42,14 +42,15 @@ Besides the primary root, `%LOCALAPPDATA%\RevitMcp\settings.json` can list extra
 - Search order is `saved_tools_root` first, then `saved_tools_paths` in listed order.
 - On duplicate tool IDs the first root wins; `list_saved_tools` reports the hidden copies under `shadowed`.
 - A disabled tool does not fall through to a later root's copy — disabling always disables.
-- New tools are still created in the primary root; that's also where `sync.ps1 -Tools` deploys and what **Activity → Settings** edits. Extra paths are edited in `settings.json` directly.
+- New tools are still created in the primary root; that's also where `sync.ps1 -Tools` deploys. Both the primary root and the extra paths are edited in the ribbon **Settings** dialog.
+- `disabled_tool_paths` in `settings.json` switches off every tool under a root at once — the pill on the path band in the pane's **Saved** view toggles it.
 
 ## Groups and enable/disable
 
 - Subfolders are groups (`annotation/tag_rooms` is tool `tag_rooms` in group `annotation`); folder names follow the same name pattern.
 - `name.disabled` next to a manifest disables that one tool.
 - A `.disabled` file inside a group folder disables everything below it.
-- **Activity → Saved** in Revit toggles both without touching files by hand.
+- The pane's **Saved** view in Revit toggles paths, groups, and tools without touching files by hand.
 
 ## Ported tools
 

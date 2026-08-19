@@ -17,7 +17,7 @@ if (-not $stage.StartsWith($distRoot, [StringComparison]::OrdinalIgnoreCase)) {
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
-Copy-Item -LiteralPath (Join-Path $root 'install-v0.9.ps1'), (Join-Path $root 'uninstall-v0.9.ps1'), (Join-Path $root 'README.md'), (Join-Path $root 'RELEASE-NOTES-v0.9.md') -Destination $stage -Force
+Copy-Item -LiteralPath (Join-Path $root 'install-v0.9.ps1'), (Join-Path $root 'uninstall-v0.9.ps1'), (Join-Path $root 'README.md') -Destination $stage -Force
 
 foreach ($component in @('revit-c-bridge','revit-pyrevit-extention','revit-mcp')) {
     $componentStage = Join-Path $stage $component

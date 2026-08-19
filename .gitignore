@@ -14,3 +14,8 @@
 *.suo
 *.pfx
 *.cer
+
+# kept locally, not published
+/REQUESTS-FOR-REOPE.md
+/RELEASE-NOTES-v0.9.md
+revit-pyrevit-extention/assets/
