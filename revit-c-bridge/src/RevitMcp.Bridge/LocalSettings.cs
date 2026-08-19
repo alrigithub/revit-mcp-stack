@@ -5,7 +5,8 @@ using System.Text.RegularExpressions;
 
 namespace RevitMcp.Bridge;
 
-internal sealed record LocalSettings(string SavedToolsRoot, List<string> SavedToolsPaths, HashSet<string> DisabledMcpTools, string? Error = null)
+internal sealed record LocalSettings(string SavedToolsRoot, List<string> SavedToolsPaths, HashSet<string> DisabledMcpTools,
+    bool BypassDialogs = true, bool AllowArbitraryCode = false, Dictionary<string, JsonElement>? Extra = null, string? Error = null)
 {
     /// <summary>Ordered search roots: the primary (writable) root first, then saved_tools_paths, deduplicated.</summary>
     public IReadOnlyList<string> SearchRoots =>
@@ -47,11 +48,11 @@ internal static partial class LocalSettingsStore
                 if (disabledNames.Any(name => !ToolNamePattern().IsMatch(name)))
                     throw new InvalidDataException("disabled_mcp_tools contains an invalid tool name.");
                 var disabled = disabledNames.ToHashSet(StringComparer.Ordinal);
-                return new(root, paths, disabled);
+                return new(root, paths, disabled, stored?.BypassDialogs ?? true, stored?.AllowArbitraryCode ?? false, stored?.Extra);
             }
             catch (Exception ex)
             {
-                return new(DefaultSavedToolsRoot, [], [], ex.Message);
+                return new(DefaultSavedToolsRoot, [], [], Error: ex.Message);
             }
         }
     }
@@ -64,6 +65,31 @@ internal static partial class LocalSettingsStore
         Directory.CreateDirectory(root);
         var settings = Load();
         Save(settings with { SavedToolsRoot = root });
+    }
+
+    public static void SetSavedToolsPaths(IReadOnlyList<string> values)
+    {
+        var paths = new List<string>();
+        foreach (var value in values)
+        {
+            var expanded = Environment.ExpandEnvironmentVariables(value.Trim());
+            if (!Path.IsPathFullyQualified(expanded)) throw new InvalidDataException("Every extra tools path must be an absolute folder path.");
+            paths.Add(Path.GetFullPath(expanded));
+        }
+        var settings = Load();
+        Save(settings with { SavedToolsPaths = paths.Distinct(StringComparer.OrdinalIgnoreCase).ToList() });
+    }
+
+    public static void SetBypassDialogs(bool enabled)
+    {
+        var settings = Load();
+        Save(settings with { BypassDialogs = enabled });
+    }
+
+    public static void SetAllowArbitraryCode(bool enabled)
+    {
+        var settings = Load();
+        Save(settings with { AllowArbitraryCode = enabled });
     }
 
     public static void SetMcpToolEnabled(string name, bool enabled)
@@ -120,17 +146,26 @@ internal static partial class LocalSettingsStore
         lock (Gate)
         {
             Directory.CreateDirectory(BaseRoot);
-            var stored = new StoredSettings(settings.SavedToolsRoot, settings.SavedToolsPaths, settings.DisabledMcpTools.Order().ToList());
+            var stored = new StoredSettings(settings.SavedToolsRoot, settings.SavedToolsPaths, settings.DisabledMcpTools.Order().ToList(),
+                settings.BypassDialogs, settings.AllowArbitraryCode) { Extra = settings.Extra };
             var staging = SettingsPath + ".tmp";
             File.WriteAllText(staging, JsonSerializer.Serialize(stored, JsonOptions));
             File.Move(staging, SettingsPath, true);
         }
     }
 
+    // Extra round-trips keys this build does not know about, so a settings write
+    // from the pane can never wipe a newer or Python-side key.
     private sealed record StoredSettings(
         [property: JsonPropertyName("saved_tools_root")] string? SavedToolsRoot,
         [property: JsonPropertyName("saved_tools_paths")] List<string>? SavedToolsPaths,
-        [property: JsonPropertyName("disabled_mcp_tools")] List<string>? DisabledMcpTools);
+        [property: JsonPropertyName("disabled_mcp_tools")] List<string>? DisabledMcpTools,
+        [property: JsonPropertyName("bypass_dialogs")] bool? BypassDialogs = null,
+        [property: JsonPropertyName("allow_arbitrary_code")] bool? AllowArbitraryCode = null)
+    {
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? Extra { get; init; }
+    }
 
     [GeneratedRegex("^[a-z][a-z0-9_]{0,63}$", RegexOptions.CultureInvariant)]
     private static partial Regex ToolNamePattern();

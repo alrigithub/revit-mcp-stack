@@ -25,6 +25,24 @@ public sealed class BridgeOffCommand : IExternalCommand
 }
 
 [Transaction(TransactionMode.Manual)]
+public sealed class SettingsCommand : IExternalCommand
+{
+    public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+    {
+        try
+        {
+            new SettingsDialog(commandData.Application.MainWindowHandle).ShowDialog();
+            return Result.Succeeded;
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            return Result.Failed;
+        }
+    }
+}
+
+[Transaction(TransactionMode.Manual)]
 public sealed class ActivityPaneCommand : IExternalCommand
 {
     public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)

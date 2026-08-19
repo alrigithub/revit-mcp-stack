@@ -92,6 +92,17 @@ public sealed class PipeServer : IDisposable
                 return Error(request.RequestId, "source_too_large", $"Source limit is {ProtocolConstants.MaxSourceBytes} bytes.");
         }
 
+        var settings = LocalSettingsStore.Load();
+        if (!settings.AllowArbitraryCode)
+        {
+            foreach (var (dynamicTool, dynamicSource) in DynamicSources(request))
+            {
+                if (CodeGate.IsVetted(settings, dynamicTool, dynamicSource)) continue;
+                return Error(request.RequestId, "arbitrary_code_disabled",
+                    "Arbitrary code is disabled on this machine; only enabled saved tools may run. Use run_saved_tool, or an operator can enable 'Allow arbitrary code' in Revit MCP Settings on the ribbon.");
+            }
+        }
+
         if (request.Tool == "run_csharp")
         {
             var prepared = _runtime.Roslyn.Prepare(request.RequestId, source.GetString() ?? string.Empty);
@@ -136,13 +147,45 @@ public sealed class PipeServer : IDisposable
                 record.Transition(RequestState.Failed, errorCode: "queue_full", redactedError: "Bounded Revit queue is full; no mutation was admitted.");
                 return RecordResponse(record);
             }
-            _runtime.Log.Add(new(DateTimeOffset.UtcNow, request.RequestId, request.DocumentSession, "admitted", request.Tool, "queued", inputBytes, null, providerGeneration, null, request.TransactionMode));
+            _runtime.Log.Add(new(DateTimeOffset.UtcNow, request.RequestId, request.DocumentSession, "admitted", request.Tool, "queued", inputBytes, null, providerGeneration, null, request.TransactionMode, null, AdmittedLabel(request.Arguments)));
             _runtime.NotifyWork();
         }
 
         while (!record.State.IsTerminal() && DateTimeOffset.UtcNow < request.DeadlineUtc && !cancellationToken.IsCancellationRequested)
             await Task.Delay(10, cancellationToken).ConfigureAwait(false);
         return RecordResponse(record);
+    }
+
+    private static string? AdmittedLabel(JsonElement args) =>
+        args.ValueKind == JsonValueKind.Object && args.TryGetProperty("label", out var label)
+        && label.ValueKind == JsonValueKind.String && label.GetString() is { Length: > 0 } text
+            ? text[..Math.Min(text.Length, 120)]
+            : null;
+
+    // Every shape that can carry agent-authored source: direct dynamic calls,
+    // batch steps, and the nested execute_and_verify action.
+    private static IEnumerable<(string Tool, string Source)> DynamicSources(ProtocolRequest request)
+    {
+        if (request.Tool is "run_python" or "run_csharp")
+        {
+            if (request.Arguments.TryGetProperty("source", out var direct) && direct.ValueKind == JsonValueKind.String)
+                yield return (request.Tool, direct.GetString()!);
+            yield break;
+        }
+        if (request.Tool == "execute_batch" && request.Arguments.TryGetProperty("steps", out var steps) && steps.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var step in steps.EnumerateArray())
+            {
+                if (!step.TryGetProperty("tool", out var stepTool) || stepTool.GetString() is not ("run_python" or "run_csharp")) continue;
+                if (step.TryGetProperty("arguments", out var stepArgs) && stepArgs.TryGetProperty("source", out var stepSource) && stepSource.ValueKind == JsonValueKind.String)
+                    yield return (stepTool.GetString()!, stepSource.GetString()!);
+            }
+            yield break;
+        }
+        if (request.Tool == "execute_and_verify" && request.Arguments.TryGetProperty("action", out var action)
+            && action.TryGetProperty("tool", out var actionTool) && actionTool.GetString() is ("run_python" or "run_csharp")
+            && action.TryGetProperty("arguments", out var actionArgs) && actionArgs.TryGetProperty("source", out var actionSource) && actionSource.ValueKind == JsonValueKind.String)
+            yield return (actionTool.GetString()!, actionSource.GetString()!);
     }
 
     private ProtocolResponse? FastPath(ProtocolRequest request)

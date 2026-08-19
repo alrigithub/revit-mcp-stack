@@ -46,16 +46,37 @@ public sealed class TransactionCoordinator
     private static object ExecuteRead(Document document, Func<object> action)
     {
         if (document.IsModifiable) throw new RequestDispatchException("document_already_modifiable", "A read request will not run while the document is modifiable.", "Retry after the owning Revit context closes its transaction.");
-        return action();
+        return GuardModification(action, "read");
     }
     private static object ExecuteManual(Document document, Func<object> action)
     {
         var initiallyModifiable = document.IsModifiable;
-        var result = action();
+        var result = GuardModification(action, "manual");
         if (document.IsModifiable != initiallyModifiable)
             throw new RequestDispatchException("manual_transaction_left_open", "Manual code changed document modifiability across the call.", "Commit or roll back every code-owned transaction before returning.");
         return result;
     }
+    private static object GuardModification(Func<object> action, string mode)
+    {
+        // Live Revit 2025 throws ModificationOutsideTransactionException here; the
+        // message-matched InvalidOperationException covers older phrasings. Mapping
+        // matters doubly because Revit's own message contains "model", which the
+        // redaction filter would otherwise reduce to "[redacted]".
+        try { return action(); }
+        catch (Autodesk.Revit.Exceptions.ModificationOutsideTransactionException)
+        {
+            throw Forbidden(mode);
+        }
+        catch (Autodesk.Revit.Exceptions.InvalidOperationException ex) when (ex.Message.Contains("Modification of the document is forbidden", StringComparison.OrdinalIgnoreCase))
+        {
+            throw Forbidden(mode);
+        }
+    }
+    private static RequestDispatchException Forbidden(string mode) => new("modification_without_transaction",
+        $"The code modified the document while transaction_mode '{mode}' had no open transaction.",
+        mode == "read"
+            ? "Re-run with transaction_mode 'auto' (one bridge-owned transaction) or 'group'."
+            : "Start and commit a Transaction inside the code, or re-run with transaction_mode 'auto'.");
     private static object ExecuteAuto(Document document, string name, Func<object> action)
     {
         using var transaction = new Transaction(document, name);

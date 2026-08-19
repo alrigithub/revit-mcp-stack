@@ -28,6 +28,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
 
     private readonly BridgeRuntime _runtime;
     private readonly TextBlock _project = ValueText();
+    private readonly TextBlock _context = ValueText();
     private readonly TextBlock _queue = ValueText();
     private readonly TextBlock _totals = ValueText();
     private readonly TextBlock _environment = ValueText();
@@ -38,17 +39,17 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
     private readonly Button _activityButton = new();
     private readonly Button _toolsButton = new();
     private readonly Button _savedButton = new();
-    private readonly Button _settingsButton = new();
     private readonly Button _clearButton = new();
+    private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
     private UITheme? _appliedTheme;
     private string? _lastDocumentTitle;
+    private IReadOnlyList<string> _openDocuments = [];
     private PaneView _view = PaneView.Activity;
     private DateTime _toolsManifestStamp;
     private DateTime _savedStamp;
-    private DateTime _settingsStamp;
     private int _savedCount = -1;
 
-    private enum PaneView { Activity, Tools, Saved, Settings }
+    private enum PaneView { Activity, Tools, Saved }
 
     public ActivityPane(BridgeRuntime runtime)
     {
@@ -101,16 +102,17 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         Resources[ErrorKey] = Brush(palette.Error);
     }
 
-    public void Refresh(string? documentTitle)
+    public void Refresh(string? documentTitle, IReadOnlyList<string>? openDocuments = null)
     {
         if (!Dispatcher.CheckAccess())
         {
-            _ = Dispatcher.BeginInvoke(() => Refresh(documentTitle));
+            _ = Dispatcher.BeginInvoke(() => Refresh(documentTitle, openDocuments));
             return;
         }
 
         ApplyTheme();
         _lastDocumentTitle = documentTitle;
+        if (openDocuments is not null) _openDocuments = openDocuments;
         var bridgeState = _runtime.State.ToString().ToLowerInvariant();
         var pythonState = _runtime.Providers.Capability;
         var csharpState = _runtime.Roslyn.Capability;
@@ -120,6 +122,12 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         ApplyStatus(_csharpDot, csharpState, "C#");
         _project.Text = documentTitle ?? "No active document";
         _project.ToolTip = _project.Text;
+        _context.Text = "PID " + Environment.ProcessId + " · "
+            + (_openDocuments.Count == 1 ? "1 document open" : _openDocuments.Count + " documents open");
+        _context.ToolTip = _openDocuments.Count == 0
+            ? "No documents are open in this Revit process."
+            : "Open in this Revit process:\n" + string.Join("\n",
+                _openDocuments.Select(title => (title == documentTitle ? "▸ " : "   ") + title));
         var queued = _runtime.Queue.Count;
         _queue.Text = queued > 0 ? queued + " queued" : "";
         _queue.Visibility = queued > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -137,11 +145,6 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         if (_view == PaneView.Saved)
         {
             RefreshSaved();
-            return;
-        }
-        if (_view == PaneView.Settings)
-        {
-            RefreshSettings();
             return;
         }
 
@@ -187,7 +190,13 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         _queue.SetResourceReference(TextBlock.ForegroundProperty, WarningKey);
         Grid.SetColumn(_queue, 2);
         headerGrid.Children.Add(_queue);
-        header.Child = headerGrid;
+        var headerStack = new StackPanel();
+        headerStack.Children.Add(headerGrid);
+        _context.FontSize = 10;
+        _context.Margin = new Thickness(0, 2, 0, 0);
+        _context.SetResourceReference(TextBlock.ForegroundProperty, MutedTextKey);
+        headerStack.Children.Add(_context);
+        header.Child = headerStack;
         root.Children.Add(header);
 
         var controls = ThemedBorder(SectionKey, new Thickness(0), new Thickness(10, 5, 10, 5));
@@ -213,17 +222,11 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         Grid.SetColumn(_toolsButton, 2);
         controlsGrid.Children.Add(_toolsButton);
         ConfigureSegment(_savedButton, "Saved");
-        _savedButton.ToolTip = "Saved tools: proven scripts promoted to reusable named tools on disk.";
+        _savedButton.ToolTip = "Saved tools: proven scripts promoted to reusable named tools on disk. Locations and execution policy live in the ribbon Settings.";
         _savedButton.Margin = new Thickness(1, 0, 0, 0);
         _savedButton.Click += (_, _) => SetView(PaneView.Saved);
         Grid.SetColumn(_savedButton, 3);
         controlsGrid.Children.Add(_savedButton);
-        ConfigureSegment(_settingsButton, "Settings");
-        _settingsButton.ToolTip = "Saved-tool location and runtime MCP tool controls.";
-        _settingsButton.Margin = new Thickness(1, 0, 0, 0);
-        _settingsButton.Click += (_, _) => SetView(PaneView.Settings);
-        Grid.SetColumn(_settingsButton, 4);
-        controlsGrid.Children.Add(_settingsButton);
         controls.Child = controlsGrid;
         Grid.SetRow(controls, 1);
         root.Children.Add(controls);
@@ -276,7 +279,6 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         _view = view;
         _toolsManifestStamp = default;
         _savedStamp = default;
-        _settingsStamp = default;
         _savedCount = -1;
         ApplySegmentStyles();
         Refresh(_lastDocumentTitle);
@@ -287,7 +289,6 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         _activityButton.Style = _view == PaneView.Activity ? ActiveSegmentStyle() : FlatButtonStyle();
         _toolsButton.Style = _view == PaneView.Tools ? ActiveSegmentStyle() : FlatButtonStyle();
         _savedButton.Style = _view == PaneView.Saved ? ActiveSegmentStyle() : FlatButtonStyle();
-        _settingsButton.Style = _view == PaneView.Settings ? ActiveSegmentStyle() : FlatButtonStyle();
     }
 
     private StackPanel StatusChip(Ellipse dot, string label)
@@ -355,10 +356,18 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         Grid.SetColumn(time, 1);
         line.Children.Add(time);
 
-        var tool = ThemedText(row.Admitted.Tool ?? "?", TextKey);
-        tool.FontWeight = FontWeights.SemiBold;
-        tool.TextTrimming = TextTrimming.CharacterEllipsis;
-        tool.Margin = new Thickness(7, 0, 0, 0);
+        var label = terminal?.Label ?? row.Admitted.Label;
+        var summary = terminal?.Summary;
+        var tool = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(7, 0, 0, 0) };
+        var title = new System.Windows.Documents.Run(label ?? row.Admitted.Tool ?? "?") { FontWeight = FontWeights.SemiBold };
+        title.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, TextKey);
+        tool.Inlines.Add(title);
+        if (!string.IsNullOrWhiteSpace(summary))
+        {
+            var detail = new System.Windows.Documents.Run(" · " + summary);
+            detail.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, MutedTextKey);
+            tool.Inlines.Add(detail);
+        }
         tool.ToolTip = ToolTipText(row, state);
         Grid.SetColumn(tool, 2);
         line.Children.Add(tool);
@@ -425,6 +434,7 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         var description = ThemedText(text, SecondaryTextKey);
         description.TextTrimming = TextTrimming.CharacterEllipsis;
         description.Margin = new Thickness(7, 0, 0, 0);
+        if (!string.IsNullOrWhiteSpace(entry.Provider)) description.ToolTip = entry.Provider;
         Grid.SetColumn(description, 2);
         line.Children.Add(description);
         item.Content = line;
@@ -433,7 +443,11 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
 
     private static string ToolTipText(RequestRow row, string state)
     {
-        var parts = new List<string> { row.Admitted.Tool ?? "?", DisplayState(state) };
+        var parts = new List<string> { row.Admitted.Tool ?? "?" };
+        var label = row.Terminal?.Label ?? row.Admitted.Label;
+        if (label is not null) parts.Add("\"" + label + "\"");
+        parts.Add(DisplayState(state));
+        if (row.Terminal?.Summary is { } summary) parts.Add(summary);
         if (row.Terminal is not null && row.Terminal != row.Admitted)
             parts.Add("queued " + FormatSpan(row.Terminal.TimestampUtc - row.Admitted.TimestampUtc - TimeSpan.FromMilliseconds(row.Terminal.ElapsedMs ?? 0)));
         if (row.Admitted.RequestId is not null) parts.Add(row.Admitted.RequestId);
@@ -493,47 +507,71 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
     {
         var item = new ListBoxItem();
         var panel = new StackPanel();
-        var line = new Grid();
+        var key = "mcp:" + (tool.Name ?? "?");
+        var expanded = _expanded.Contains(key);
+
+        var line = new Grid { Background = Brushes.Transparent };
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         line.ColumnDefinitions.Add(new ColumnDefinition());
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.Children.Add(ThemedText(expanded ? "▾" : "▸", MutedTextKey));
         var name = ThemedText(tool.Name ?? "?", TextKey);
         name.FontWeight = FontWeights.SemiBold;
+        name.TextTrimming = TextTrimming.CharacterEllipsis;
+        Grid.SetColumn(name, 1);
         line.Children.Add(name);
         if (!string.IsNullOrWhiteSpace(tool.Name))
         {
             var enabled = !LocalSettingsStore.Load().DisabledMcpTools.Contains(tool.Name);
-            var toggle = SmallActionButton(enabled ? "Disable" : "Enable");
-            toggle.ToolTip = enabled
-                ? "Disable this MCP tool immediately. Reconnect the AI client to refresh its visible tool list."
-                : "Enable this MCP tool. Reconnect the AI client to refresh its visible tool list.";
-            toggle.Click += (_, _) =>
+            var pill = StatePill(enabled, enabled ? "Enabled" : "Disabled");
+            pill.ToolTip = (enabled ? "Click to disable this MCP tool." : "Click to enable this MCP tool.")
+                + " Reconnect the AI client to refresh its visible tool list.";
+            pill.Click += (_, _) =>
             {
                 LocalSettingsStore.SetMcpToolEnabled(tool.Name, !enabled);
                 _toolsManifestStamp = default;
                 RefreshTools();
             };
-            Grid.SetColumn(toggle, 1);
-            line.Children.Add(toggle);
+            Grid.SetColumn(pill, 2);
+            line.Children.Add(pill);
         }
+        line.MouseLeftButtonUp += (_, _) => { ToggleExpanded(key); _toolsManifestStamp = default; RefreshTools(); };
         panel.Children.Add(line);
-        if (tool.Params is { Count: > 0 })
+
+        if (expanded)
         {
-            var parameters = ThemedText(string.Join(", ", tool.Params), MutedTextKey);
-            parameters.FontSize = 10;
-            parameters.TextWrapping = TextWrapping.Wrap;
-            parameters.Margin = new Thickness(0, 1, 0, 0);
-            panel.Children.Add(parameters);
-        }
-        if (!string.IsNullOrWhiteSpace(tool.Description))
-        {
-            var description = ThemedText(tool.Description, SecondaryTextKey);
-            description.FontSize = 10;
-            description.TextWrapping = TextWrapping.Wrap;
-            description.Margin = new Thickness(0, 3, 0, 0);
-            panel.Children.Add(description);
+            if (!string.IsNullOrWhiteSpace(tool.Description))
+            {
+                var description = ThemedText(tool.Description, SecondaryTextKey);
+                description.FontSize = 10;
+                description.TextWrapping = TextWrapping.Wrap;
+                description.Margin = new Thickness(14, 3, 0, 0);
+                panel.Children.Add(description);
+            }
+            if (tool.Params is { Count: > 0 })
+            {
+                var heading = ThemedText("Parameters", MutedTextKey);
+                heading.FontSize = 10;
+                heading.FontWeight = FontWeights.SemiBold;
+                heading.Margin = new Thickness(14, 4, 0, 0);
+                panel.Children.Add(heading);
+                foreach (var parameter in tool.Params)
+                {
+                    var row = ThemedText("• " + parameter, MutedTextKey);
+                    row.FontSize = 10;
+                    row.TextWrapping = TextWrapping.Wrap;
+                    row.Margin = new Thickness(18, 1, 0, 0);
+                    panel.Children.Add(row);
+                }
+            }
         }
         item.Content = panel;
         return item;
+    }
+
+    private void ToggleExpanded(string key)
+    {
+        if (!_expanded.Add(key)) _expanded.Remove(key);
     }
 
     private sealed record SavedManifest(
@@ -652,18 +690,49 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         var name = ThemedText(relative, directlyEnabled && inheritedEnabled ? TextKey : MutedTextKey);
         name.FontWeight = FontWeights.SemiBold;
         line.Children.Add(name);
-        var toggle = SmallActionButton(directlyEnabled ? "Disable group" : "Enable group");
-        toggle.IsEnabled = inheritedEnabled;
-        toggle.Click += (_, _) =>
+        var pill = StatePill(directlyEnabled && inheritedEnabled, !inheritedEnabled ? "Group off" : directlyEnabled ? "Enabled" : "Disabled");
+        pill.IsEnabled = inheritedEnabled;
+        pill.ToolTip = !inheritedEnabled
+            ? "A parent group is disabled; enable it first."
+            : "Applies to every tool in this group. Takes effect on the next call.";
+        pill.Click += (_, _) =>
         {
             LocalSettingsStore.SetGroupEnabled(directory, !directlyEnabled);
             _savedCount = -1;
             RefreshSaved();
         };
-        Grid.SetColumn(toggle, 1);
-        line.Children.Add(toggle);
+        Grid.SetColumn(pill, 1);
+        line.Children.Add(pill);
         item.Content = line;
         return item;
+    }
+
+    private Button StatePill(bool enabled, string text) => new()
+    {
+        Content = text,
+        MinWidth = 56,
+        Height = 18,
+        Padding = new Thickness(7, 0, 7, 0),
+        Margin = new Thickness(8, 0, 0, 0),
+        FontSize = 10,
+        FontWeight = FontWeights.SemiBold,
+        Style = PillStyle(enabled ? SuccessKey : ErrorKey)
+    };
+
+    // Like FlatButtonStyle but the foreground (green/red state color) survives hover.
+    private Style PillStyle(string foregroundKey)
+    {
+        var style = new Style(typeof(Button));
+        style.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(SurfaceKey)));
+        style.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension(foregroundKey)));
+        style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
+        var hover = new Trigger { Property = IsMouseOverProperty, Value = true };
+        hover.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(HoverKey)));
+        style.Triggers.Add(hover);
+        var pressed = new Trigger { Property = Button.IsPressedProperty, Value = true };
+        pressed.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(PressedKey)));
+        style.Triggers.Add(pressed);
+        return style;
     }
 
     private ListBoxItem SavedItem(string root, string manifestPath, SavedManifest? manifest)
@@ -679,123 +748,85 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
             return item;
         }
 
-        var line = new Grid();
+        var key = "saved:" + manifestPath;
+        var expanded = _expanded.Contains(key);
+        var line = new Grid { Background = Brushes.Transparent };
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         line.ColumnDefinitions.Add(new ColumnDefinition());
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var groupsEnabled = LocalSettingsStore.GroupsEnabled(root, System.IO.Path.GetDirectoryName(manifestPath)!);
         var directlyEnabled = !File.Exists(System.IO.Path.ChangeExtension(manifestPath, ".disabled"));
-        var name = ThemedText(manifest.Name, TextKey);
+        line.Children.Add(ThemedText(expanded ? "▾" : "▸", MutedTextKey));
+        var name = ThemedText(manifest.Name, groupsEnabled && directlyEnabled ? TextKey : MutedTextKey);
         name.FontWeight = FontWeights.SemiBold;
-        if (!groupsEnabled || !directlyEnabled) name.SetResourceReference(TextBlock.ForegroundProperty, MutedTextKey);
+        name.TextTrimming = TextTrimming.CharacterEllipsis;
+        Grid.SetColumn(name, 1);
         line.Children.Add(name);
         var meta = ThemedText((manifest.Engine ?? "?") + " · " + (manifest.TransactionMode ?? "?"), MutedTextKey);
         meta.FontSize = 10;
         meta.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(meta, 1);
+        meta.Margin = new Thickness(8, 0, 0, 0);
+        Grid.SetColumn(meta, 2);
         line.Children.Add(meta);
-        var toggle = SmallActionButton(directlyEnabled ? "Disable" : "Enable");
-        toggle.IsEnabled = groupsEnabled;
-        toggle.Click += (_, _) =>
+        var pill = StatePill(groupsEnabled && directlyEnabled, !groupsEnabled ? "Group off" : directlyEnabled ? "Enabled" : "Disabled");
+        pill.IsEnabled = groupsEnabled;
+        pill.ToolTip = !groupsEnabled
+            ? "A parent group is disabled; enable the group to use this tool."
+            : directlyEnabled ? "Click to disable this saved tool. Takes effect on the next call." : "Click to enable this saved tool. Takes effect on the next call.";
+        pill.Click += (_, _) =>
         {
             LocalSettingsStore.SetSavedToolEnabled(manifestPath, !directlyEnabled);
             _savedCount = -1;
             RefreshSaved();
         };
-        Grid.SetColumn(toggle, 2);
-        line.Children.Add(toggle);
+        Grid.SetColumn(pill, 3);
+        line.Children.Add(pill);
+        line.MouseLeftButtonUp += (_, _) => { ToggleExpanded(key); _savedCount = -1; RefreshSaved(); };
         panel.Children.Add(line);
 
-        if (manifest.Params is { Count: > 0 })
+        if (expanded)
         {
-            var text = string.Join(", ", manifest.Params.Select(p => (p.Name ?? "?") + (p.Required ? "*" : "")));
-            var parameters = ThemedText(text, MutedTextKey);
-            parameters.FontSize = 10;
-            parameters.TextWrapping = TextWrapping.Wrap;
-            parameters.Margin = new Thickness(0, 1, 0, 0);
-            panel.Children.Add(parameters);
-        }
-        if (!string.IsNullOrWhiteSpace(manifest.Description))
-        {
-            var description = ThemedText(manifest.Description, SecondaryTextKey);
-            description.FontSize = 10;
-            description.TextWrapping = TextWrapping.Wrap;
-            description.Margin = new Thickness(0, 3, 0, 0);
-            panel.Children.Add(description);
+            if (!string.IsNullOrWhiteSpace(manifest.Description))
+            {
+                var description = ThemedText(manifest.Description, SecondaryTextKey);
+                description.FontSize = 10;
+                description.TextWrapping = TextWrapping.Wrap;
+                description.Margin = new Thickness(14, 3, 0, 0);
+                panel.Children.Add(description);
+            }
+            var heading = ThemedText("Parameters", MutedTextKey);
+            heading.FontSize = 10;
+            heading.FontWeight = FontWeights.SemiBold;
+            heading.Margin = new Thickness(14, 4, 0, 0);
+            panel.Children.Add(heading);
+            if (manifest.Params is { Count: > 0 })
+            {
+                foreach (var parameter in manifest.Params)
+                {
+                    var row = new TextBlock { FontSize = 10, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(18, 1, 0, 0) };
+                    var parameterName = new System.Windows.Documents.Run(parameter.Name ?? "?") { FontWeight = FontWeights.SemiBold };
+                    parameterName.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, SecondaryTextKey);
+                    row.Inlines.Add(parameterName);
+                    var type = new System.Windows.Documents.Run("  " + (parameter.Type ?? "any"));
+                    type.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, MutedTextKey);
+                    row.Inlines.Add(type);
+                    var requirement = new System.Windows.Documents.Run(parameter.Required ? "  required" : "  optional");
+                    requirement.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, parameter.Required ? WarningKey : MutedTextKey);
+                    row.Inlines.Add(requirement);
+                    panel.Children.Add(row);
+                }
+            }
+            else
+            {
+                var none = ThemedText("No parameters — runs as-is.", MutedTextKey);
+                none.FontSize = 10;
+                none.Margin = new Thickness(18, 1, 0, 0);
+                panel.Children.Add(none);
+            }
         }
         item.Content = panel;
         return item;
-    }
-
-    private void RefreshSettings()
-    {
-        DateTime stamp;
-        try { stamp = File.GetLastWriteTimeUtc(LocalSettingsStore.SettingsPath); }
-        catch { stamp = default; }
-        if (stamp == _settingsStamp && _activity.Items.Count > 0) return;
-        _settingsStamp = stamp;
-
-        var settings = LocalSettingsStore.Load();
-        _activity.Items.Clear();
-        _totals.Text = settings.Error is null ? "" : "Invalid settings";
-
-        var item = new ListBoxItem();
-        var panel = new StackPanel();
-        var title = ThemedText("Saved tools folder", TextKey);
-        title.FontWeight = FontWeights.SemiBold;
-        panel.Children.Add(title);
-        var note = ThemedText("The model reads this path from list_saved_tools before creating files.", SecondaryTextKey);
-        note.FontSize = 10;
-        note.TextWrapping = TextWrapping.Wrap;
-        note.Margin = new Thickness(0, 2, 0, 6);
-        panel.Children.Add(note);
-
-        var pathBox = new System.Windows.Controls.TextBox
-        {
-            Text = settings.SavedToolsRoot,
-            Padding = new Thickness(5, 3, 5, 3),
-            BorderThickness = new Thickness(1)
-        };
-        pathBox.SetResourceReference(Control.BackgroundProperty, SurfaceKey);
-        pathBox.SetResourceReference(Control.ForegroundProperty, TextKey);
-        pathBox.SetResourceReference(Control.BorderBrushProperty, BorderKey);
-        panel.Children.Add(pathBox);
-
-        var save = SmallActionButton("Save folder");
-        save.HorizontalAlignment = HorizontalAlignment.Left;
-        save.Margin = new Thickness(0, 6, 0, 0);
-        save.Click += (_, _) =>
-        {
-            try
-            {
-                LocalSettingsStore.SetSavedToolsRoot(pathBox.Text);
-                pathBox.Text = LocalSettingsStore.Load().SavedToolsRoot;
-                _totals.Text = "Settings saved";
-                _savedCount = -1;
-                _settingsStamp = File.GetLastWriteTimeUtc(LocalSettingsStore.SettingsPath);
-            }
-            catch (Exception ex)
-            {
-                _totals.Text = "Settings error";
-                pathBox.ToolTip = ex.Message;
-            }
-        };
-        panel.Children.Add(save);
-
-        if (settings.Error is not null)
-        {
-            var error = ThemedText(settings.Error, ErrorKey);
-            error.TextWrapping = TextWrapping.Wrap;
-            error.Margin = new Thickness(0, 6, 0, 0);
-            panel.Children.Add(error);
-        }
-        var reconnect = ThemedText("Built-in MCP tool switches are on the Tools page. Reconnect the AI client after changing them so its visible tool list refreshes.", MutedTextKey);
-        reconnect.FontSize = 10;
-        reconnect.TextWrapping = TextWrapping.Wrap;
-        reconnect.Margin = new Thickness(0, 10, 0, 0);
-        panel.Children.Add(reconnect);
-        item.Content = panel;
-        _activity.Items.Add(item);
     }
 
     private Button SmallActionButton(string label)
@@ -938,49 +969,4 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
         return brush;
     }
 
-    private sealed record RevitPalette(
-        Color Background,
-        Color Surface,
-        Color Section,
-        Color Hover,
-        Color Pressed,
-        Color Text,
-        Color SecondaryText,
-        Color MutedText,
-        Color Border,
-        Color Accent,
-        Color Success,
-        Color Warning,
-        Color Error)
-    {
-        public static RevitPalette Dark { get; } = new(
-            Color.FromRgb(42, 46, 54),
-            Color.FromRgb(50, 55, 64),
-            Color.FromRgb(55, 61, 71),
-            Color.FromRgb(52, 66, 86),
-            Color.FromRgb(38, 52, 70),
-            Color.FromRgb(242, 244, 247),
-            Color.FromRgb(191, 199, 210),
-            Color.FromRgb(145, 156, 171),
-            Color.FromRgb(76, 84, 96),
-            Color.FromRgb(58, 124, 186),
-            Color.FromRgb(67, 190, 105),
-            Color.FromRgb(224, 168, 59),
-            Color.FromRgb(220, 101, 101));
-
-        public static RevitPalette Light { get; } = new(
-            Color.FromRgb(243, 243, 243),
-            Color.FromRgb(250, 250, 250),
-            Color.FromRgb(229, 229, 229),
-            Color.FromRgb(225, 237, 247),
-            Color.FromRgb(207, 226, 241),
-            Color.FromRgb(35, 38, 42),
-            Color.FromRgb(75, 82, 90),
-            Color.FromRgb(105, 115, 126),
-            Color.FromRgb(198, 198, 198),
-            Color.FromRgb(25, 118, 185),
-            Color.FromRgb(46, 125, 50),
-            Color.FromRgb(178, 106, 0),
-            Color.FromRgb(179, 38, 30));
-    }
 }

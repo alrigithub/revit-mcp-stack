@@ -4,22 +4,27 @@ Hard-won operational notes from live sessions. Read this before driving the brid
 
 ## Connection
 
-- **Stale document reference** = every doc-level call fails with
-  `InvalidObjectException: referenced object is not valid, possibly deleted`.
-  Bridge toggle off/on and provider reloads **do not clear it**.
-  → **Restart Revit.** (Happens after Revit is left running overnight / doc closed.)
-- **`doc.EditFamily()` poisons the bridge.** Opening + closing a family doc via
-  EditFamily leaves a dead document handle in the bridge's session registry —
-  the *next* call (even `get_active_context`) fails instantly with the
-  InvalidObjectException above, and only a full Revit restart clears it.
-  → Never EditFamily through the bridge. Carry profile/geometry data as raw
-  coordinates instead. `app.NewFamilyDocument()` + `LoadFamily` + `Close(False)`
-  is safe — it's specifically EditFamily that breaks.
-- **Family-doc regen failures raise MODAL error dialogs** ("Line is too short",
-  Error - cannot be ignored) even for API-created background family docs. The
-  dialog blocks the whole bridge until the user dismisses it in Revit. Constraint
-  experiments in family docs are therefore not "invisible" — a broken flex
-  interrupts the user.
+- **Stale document reference — FIXED in bridge 0.1.10.** Closed documents
+  (overnight sessions, `doc.EditFamily()` leftovers) used to poison the session
+  registry until a full Revit restart: Revit's `Document.Equals`/`GetHashCode`
+  throw `InvalidObjectException` on dead handles, so one dead dictionary key
+  broke every later call. The registry now purges dead handles on every call
+  and skips invalid documents when enumerating. Verified live: EditFamily →
+  register → close → next call succeeds. If a bound document closes, calls
+  return a clean `document_closed` — `list_documents` again to re-bind.
+- **`doc.EditFamily()` is safe through the bridge since 0.1.10.** Scripts should
+  still close family docs they open (`fdoc.Close(False)` in a guarded finally);
+  an fdoc left open is a real open document and stays in `list_documents`.
+- **Modal dialogs no longer block the bridge** (0.1.10+, "Bypass dialogs" ON —
+  the default, toggle in ribbon **Settings**). During bridge calls: warnings are
+  committed and their full text logged; blocking errors roll the transaction
+  back and the call fails with `Revit reported: …`; stray popups are
+  auto-answered (task dialogs → Cancel, message boxes → OK) and recorded.
+  Note: overlap-type conflicts (walls, room separation lines) are WARNINGS in
+  Revit 2025 — they commit. The error-severity auto-rollback branch has not yet
+  fired in a live session; first real constraint failure will exercise it.
+  With the bypass OFF, stock dialogs return — and a popup then freezes the
+  queue until a human dismisses it.
 
 ## Family documents (via NewFamilyDocument)
 
@@ -48,6 +53,25 @@ Hard-won operational notes from live sessions. Read this before driving the brid
   - `group` — one assimilated undo item
 - One script = one undo step. Batch related work into ONE call — each call waits on
   Revit's single UI thread.
+- Modifying the document with no open transaction returns
+  `modification_without_transaction` with the fix in the message (0.1.11+).
+- **In `manual` mode, check what `Commit()` returns.** When failure processing
+  rolls a transaction back (blocking error under the dialog bypass), `Commit()`
+  returns `RolledBack` instead of raising — a script that ignores the status
+  continues with its changes silently gone.
+- Warnings suppressed by the dialog bypass are deleted at commit; audit the
+  document's warning state with `get_warnings`, and read the suppressed texts
+  in the Activity log / `get_logs_tail`.
+
+## Execution policy (ribbon Settings, 0.1.11+)
+
+- **Allow arbitrary code** (default OFF on fresh installs): when off,
+  `run_python`/`run_csharp` accept only source that content-matches an enabled
+  saved-tool script on disk in the configured roots — `run_saved_tool` and all
+  read-only bridge tools keep working; anything else fails with
+  `arbitrary_code_disabled`.
+- Both settings are read per call: flipping them needs no restart and no
+  bridge toggle.
 
 ## IronPython 2.7 traps
 

@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace RevitMcp.Bridge;
 
-public sealed record OperationalLogEntry(DateTimeOffset TimestampUtc, string? RequestId, string? DocumentSession, string Event, string? Tool, string? State, int? Bytes, long? ElapsedMs, string? Provider, string? RedactedError, string? TransactionMode = null);
+public sealed record OperationalLogEntry(DateTimeOffset TimestampUtc, string? RequestId, string? DocumentSession, string Event, string? Tool, string? State, int? Bytes, long? ElapsedMs, string? Provider, string? RedactedError, string? TransactionMode = null, string? Summary = null, string? Label = null);
 
 public sealed class OperationalLog
 {

@@ -1,5 +1,7 @@
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Events;
 using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Events;
 using RevitMcp.Core;
 using System.Diagnostics;
 using System.IO;
@@ -10,6 +12,9 @@ namespace RevitMcp.Bridge;
 public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventHandler
 {
     private readonly TransactionCoordinator _transactions = new();
+    private readonly List<string> _revitFailures = new();
+    private bool _bypassDialogs = true;
+    private int _added, _modified, _deleted;
     private static readonly HashSet<string> UiTools = new(StringComparer.Ordinal) { "select_elements", "zoom_to_elements", "open_view" };
     private static readonly HashSet<string> ContextFreeTools = new(StringComparer.Ordinal) { "list_documents", "get_active_context", "reload_python_provider", "reload_tool_provider" };
     public string GetName() => "Revit MCP bounded request dispatcher";
@@ -19,6 +24,18 @@ public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventH
         runtime.HandlerStarted();
         var turn = Stopwatch.StartNew();
         var processed = 0;
+        // Bridge work runs headless: a modal dialog would block the queue until a
+        // human dismisses it in Revit. While the handler owns the UI thread, failures
+        // are resolved without UI and dialogs are answered automatically; both are
+        // reported through the request's error text and the operational log.
+        // Operators can turn the bypass off in Settings to get stock Revit dialogs.
+        _bypassDialogs = LocalSettingsStore.Load().BypassDialogs;
+        if (_bypassDialogs)
+        {
+            app.DialogBoxShowing += OnDialogBoxShowing;
+            app.Application.FailuresProcessing += OnFailuresProcessing;
+        }
+        app.Application.DocumentChanged += OnDocumentChanged;
         try
         {
             while (processed < 8 && turn.ElapsedMilliseconds < 50 && runtime.Queue.TryDequeue(out var record))
@@ -27,12 +44,67 @@ public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventH
                 Process(app, record); processed++;
             }
         }
-        finally { runtime.HandlerExited(); }
+        finally
+        {
+            if (_bypassDialogs)
+            {
+                app.DialogBoxShowing -= OnDialogBoxShowing;
+                app.Application.FailuresProcessing -= OnFailuresProcessing;
+            }
+            app.Application.DocumentChanged -= OnDocumentChanged;
+            runtime.HandlerExited();
+        }
+    }
+
+    private void OnDocumentChanged(object? sender, DocumentChangedEventArgs args)
+    {
+        _added += args.GetAddedElementIds().Count;
+        _modified += args.GetModifiedElementIds().Count;
+        _deleted += args.GetDeletedElementIds().Count;
+    }
+
+    private void OnDialogBoxShowing(object? sender, DialogBoxShowingEventArgs args)
+    {
+        var text = args switch
+        {
+            TaskDialogShowingEventArgs task => task.Message,
+            MessageBoxShowingEventArgs box => box.Message,
+            _ => null
+        };
+        var answer = args is TaskDialogShowingEventArgs ? "Cancel" : "OK";
+        _revitFailures.Add($"dialog[{args.DialogId}]{(string.IsNullOrWhiteSpace(text) ? "" : $" \"{text}\"")} auto-answered {answer}");
+        args.OverrideResult(args is TaskDialogShowingEventArgs ? (int)TaskDialogResult.Cancel : 1 /* IDOK */);
+    }
+
+    private void OnFailuresProcessing(object? sender, FailuresProcessingEventArgs args)
+    {
+        var accessor = args.GetFailuresAccessor();
+        var failures = accessor.GetFailureMessages();
+        if (failures.Count == 0) return;
+        var blocking = false;
+        foreach (var failure in failures)
+        {
+            var severity = failure.GetSeverity();
+            blocking |= severity != FailureSeverity.Warning;
+            _revitFailures.Add($"{severity}: {failure.GetDescriptionText()}");
+        }
+        if (blocking) { args.SetProcessingResult(FailureProcessingResult.ProceedWithRollBack); return; }
+        accessor.DeleteAllWarnings();
+        args.SetProcessingResult(FailureProcessingResult.Continue);
+    }
+
+    private string WithRevitFailures(string message)
+    {
+        if (_revitFailures.Count == 0) return message;
+        var summary = string.Join("; ", _revitFailures.Take(5));
+        return $"{message} Revit reported: {summary[..Math.Min(summary.Length, 700)]}";
     }
 
     private void Process(UIApplication app, RequestRecord record)
     {
         var started = Stopwatch.StartNew();
+        _revitFailures.Clear();
+        _added = _modified = _deleted = 0;
         try
         {
             if (record.Admission.DeadlineUtc <= DateTimeOffset.UtcNow)
@@ -63,24 +135,61 @@ public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventH
             record.Transition(RequestState.Succeeded, bounded);
         }
         catch (ProviderGenerationException ex) { record.Transition(RequestState.Failed, errorCode: "provider_generation_changed_after_start", redactedError: ex.Message); }
-        catch (RequestDispatchException ex) { record.Transition(RequestState.Failed, errorCode: ex.Code, redactedError: ex.Message + (ex.Remediation is null ? "" : " Remediation: " + ex.Remediation)); }
-        catch (Exception ex) { record.Transition(RequestState.Failed, errorCode: "execution_failed", redactedError: Redaction.Error(ex)); }
+        catch (RequestDispatchException ex) { record.Transition(RequestState.Failed, errorCode: ex.Code, redactedError: WithRevitFailures(ex.Message + (ex.Remediation is null ? "" : " Remediation: " + ex.Remediation))); }
+        catch (Exception ex) { record.Transition(RequestState.Failed, errorCode: "execution_failed", redactedError: WithRevitFailures(Redaction.Error(ex))); }
         finally
         {
             runtime.Roslyn.DiscardPrepared(record.Admission.RequestId);
+            if (record.State == RequestState.Succeeded && _revitFailures.Count > 0)
+                runtime.Log.Add(new(DateTimeOffset.UtcNow, record.Admission.RequestId, record.Admission.DocumentSession, "revit_notices", record.Admission.Tool,
+                    "suppressed", null, null, Truncate(string.Join("; ", _revitFailures), 300), null, record.Admission.TransactionMode));
             runtime.Log.Add(new(DateTimeOffset.UtcNow, record.Admission.RequestId, record.Admission.DocumentSession, "terminal", record.Admission.Tool,
-                record.State.ToString().ToLowerInvariant(), null, started.ElapsedMilliseconds, record.Admission.ProviderGeneration, record.RedactedError, record.Admission.TransactionMode));
+                record.State.ToString().ToLowerInvariant(), null, started.ElapsedMilliseconds, record.Admission.ProviderGeneration, record.RedactedError, record.Admission.TransactionMode,
+                BuildSummary(), Label(record)));
         }
     }
+
+    private static string? Label(RequestRecord record) =>
+        record.Admission.Arguments.ValueKind == JsonValueKind.Object
+        && record.Admission.Arguments.TryGetProperty("label", out var label)
+        && label.ValueKind == JsonValueKind.String
+        && label.GetString() is { Length: > 0 } text
+            ? Truncate(text, 120)
+            : null;
+
+    private string? BuildSummary()
+    {
+        var parts = new List<string>();
+        if (_added + _modified + _deleted > 0) parts.Add($"+{_added} ~{_modified} -{_deleted}");
+        if (_revitFailures.Count > 0) parts.Add(_revitFailures.Count == 1 ? "1 Revit notice" : $"{_revitFailures.Count} Revit notices");
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
+    }
+
+    private static string Truncate(string text, int max) => text.Length <= max ? text : text[..max];
 
     private object DispatchContextFree(UIApplication app, RequestRecord request) => request.Admission.Tool switch
     {
         "list_documents" => new { documents = runtime.Documents.List(app), omitted_fields = Array.Empty<string>() },
-        "get_active_context" => app.ActiveUIDocument is null ? new { active = false } : new { active = true, document = runtime.Documents.Describe(app.ActiveUIDocument.Document, true), view_id = app.ActiveUIDocument.ActiveView.Id.Value, view_name = app.ActiveUIDocument.ActiveView.Name },
+        "get_active_context" => ActiveContext(app),
         "reload_python_provider" => runtime.Providers.Reload(),
         "reload_tool_provider" => runtime.Roslyn.Reload(),
         _ => throw new RequestDispatchException("unknown_tool", request.Admission.Tool)
     };
+
+    // A closed document (EditFamily leftover, overnight session) can linger behind
+    // ActiveUIDocument; touching its members throws InvalidObjectException, which
+    // for this tool simply means there is no usable active context.
+    private object ActiveContext(UIApplication app)
+    {
+        try
+        {
+            var uidoc = app.ActiveUIDocument;
+            var document = uidoc?.Document;
+            if (uidoc is null || document is null || !document.IsValidObject) return new { active = false };
+            return new { active = true, document = runtime.Documents.Describe(document, true), view_id = uidoc.ActiveView.Id.Value, view_name = uidoc.ActiveView.Name };
+        }
+        catch (Autodesk.Revit.Exceptions.InvalidObjectException) { return new { active = false }; }
+    }
 
     private object Dispatch(UIApplication app, Document document, UIDocument? uiDocument, RequestRecord request)
     {

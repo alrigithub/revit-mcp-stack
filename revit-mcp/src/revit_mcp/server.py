@@ -105,19 +105,25 @@ def get_active_context(pid: int, timeout_ms: int = 30_000) -> dict[str, Any]:
 
 @mcp.tool()
 def run_python(pid: int, document_session: str, document_generation: int, source: str, transaction_mode: str,
-               request: dict[str, Any] | None = None, timeout_ms: int = 30_000, request_id: str | None = None,
-               idempotency_key: str | None = None) -> dict[str, Any]:
-    """Run ONE batched IronPython 2.7 script on Revit's UI thread. Prefer one script containing all related operations over many calls because each call pays an unpredictable Revit UI wait. No f-strings/Python 3-only syntax; use % or .format(), set JSON-safe `_result`, and use `uiapp`, `doc`, `uidoc`, `request`, Revit API, and .NET interop. transaction_mode: read=no transaction, auto=one bridge transaction, manual=script owns/closes transactions, group=one assimilated undo group. If queued/revit_busy, wait; check status and reuse IDs before retrying mutations."""
-    return _call(pid, "run_python", {"source": source, "request": request or {}}, document_session, document_generation,
+               request: dict[str, Any] | None = None, label: str | None = None, timeout_ms: int = 30_000,
+               request_id: str | None = None, idempotency_key: str | None = None) -> dict[str, Any]:
+    """Run ONE batched IronPython 2.7 script on Revit's UI thread. Prefer one script containing all related operations over many calls because each call pays an unpredictable Revit UI wait. No f-strings/Python 3-only syntax; use % or .format(), set JSON-safe `_result`, and use `uiapp`, `doc`, `uidoc`, `request`, Revit API, and .NET interop. transaction_mode: read=no transaction, auto=one bridge transaction, manual=script owns/closes transactions, group=one assimilated undo group. Always pass `label`: a short human-readable phrase describing the script's intent (e.g. "place 12 frame beams"); it is shown in the Revit Activity pane. If queued/revit_busy, wait; check status and reuse IDs before retrying mutations."""
+    arguments: dict[str, Any] = {"source": source, "request": request or {}}
+    if label:
+        arguments["label"] = label[:120]
+    return _call(pid, "run_python", arguments, document_session, document_generation,
                  transaction_mode, timeout_ms, request_id, idempotency_key)
 
 
 @mcp.tool()
 def run_csharp(pid: int, document_session: str, document_generation: int, source: str, transaction_mode: str,
-               request: dict[str, Any] | None = None, timeout_ms: int = 30_000, request_id: str | None = None,
-               idempotency_key: str | None = None) -> dict[str, Any]:
-    """Compile and run ONE C# entry body containing all related operations; avoid many small calls because each pays an unpredictable Revit UI wait. The body runs with Revit/.NET objects on the UI thread and must return bounded JSON. transaction_mode: read=no transaction, auto=one bridge transaction, manual=code owns/closes transactions, group=one assimilated undo group. If queued/revit_busy, wait; check status and reuse IDs before retrying mutations."""
-    return _call(pid, "run_csharp", {"source": source, "request": request or {}}, document_session, document_generation,
+               request: dict[str, Any] | None = None, label: str | None = None, timeout_ms: int = 30_000,
+               request_id: str | None = None, idempotency_key: str | None = None) -> dict[str, Any]:
+    """Compile and run ONE C# entry body containing all related operations; avoid many small calls because each pays an unpredictable Revit UI wait. The body runs with Revit/.NET objects on the UI thread and must return bounded JSON. transaction_mode: read=no transaction, auto=one bridge transaction, manual=code owns/closes transactions, group=one assimilated undo group. Always pass `label`: a short human-readable phrase describing the code's intent (e.g. "tag all doors on level 1"); it is shown in the Revit Activity pane. If queued/revit_busy, wait; check status and reuse IDs before retrying mutations."""
+    arguments: dict[str, Any] = {"source": source, "request": request or {}}
+    if label:
+        arguments["label"] = label[:120]
+    return _call(pid, "run_csharp", arguments, document_session, document_generation,
                  transaction_mode, timeout_ms, request_id, idempotency_key)
 
 
@@ -222,7 +228,7 @@ def run_saved_tool(pid: int, document_session: str, document_generation: int, na
     tool = saved_tools.load_saved_tool(name)
     arguments = saved_tools.validate_arguments(tool, params or {})
     bridge_tool = "run_python" if tool.engine == "python" else "run_csharp"
-    return _call(pid, bridge_tool, {"source": tool.source, "request": arguments}, document_session,
+    return _call(pid, bridge_tool, {"source": tool.source, "request": arguments, "label": name[:120]}, document_session,
                  document_generation, tool.transaction_mode, timeout_ms or tool.timeout_ms, request_id, idempotency_key)
 
 

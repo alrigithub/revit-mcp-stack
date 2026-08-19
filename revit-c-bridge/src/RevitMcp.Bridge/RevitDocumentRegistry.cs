@@ -11,14 +11,18 @@ public sealed class RevitDocumentRegistry
     // document on each Application.Documents enumeration. Document overrides
     // Equals/GetHashCode for native identity, so use that equality instead of
     // ConditionalWeakTable/reference identity.
-    private readonly Dictionary<Document, Identity> _identities = new();
+    // Those same overrides throw InvalidObjectException once the native document
+    // is gone (closed doc, EditFamily leftover), so dead keys are purged by
+    // rebuilding the map — never by hashing them — and every entry point drops
+    // invalid documents before touching any other member.
+    private Dictionary<Document, Identity> _identities = new();
     private readonly DocumentGenerationRegistry _generations = new();
     private readonly object _gate = new();
 
     public object[] List(UIApplication uiapp)
     {
-        var active = uiapp.ActiveUIDocument?.Document;
-        return uiapp.Application.Documents.Cast<Document>().Select(doc => Describe(doc, SameDocument(active, doc))).ToArray();
+        var active = ActiveDocument(uiapp);
+        return uiapp.Application.Documents.Cast<Document>().Where(IsAlive).Select(doc => Describe(doc, SameDocument(active, doc))).ToArray();
     }
 
     public (Document Document, UIDocument? UiDocument) Resolve(UIApplication uiapp, string? session, long? generation, bool requireActive)
@@ -27,10 +31,11 @@ public sealed class RevitDocumentRegistry
             throw new RequestDispatchException("document_binding_required", "An explicit document_session and document_generation are required.");
         foreach (Document doc in uiapp.Application.Documents)
         {
+            if (!IsAlive(doc)) continue;
             var identity = Get(doc);
             if (identity.Session != session) continue;
             if (identity.Generation != generation) throw new RequestDispatchException("document_generation_mismatch", "The bound document was replaced or regenerated; list documents again.");
-            var uidoc = SameDocument(uiapp.ActiveUIDocument?.Document, doc) ? uiapp.ActiveUIDocument : null;
+            var uidoc = SameDocument(ActiveDocument(uiapp), doc) ? uiapp.ActiveUIDocument : null;
             if (requireActive && uidoc is null) throw new RequestDispatchException("document_not_active", "Activate the bound document for this UI-only operation.");
             return (doc, uidoc);
         }
@@ -39,6 +44,7 @@ public sealed class RevitDocumentRegistry
 
     public object Describe(Document doc, bool active)
     {
+        if (!IsAlive(doc)) throw new RequestDispatchException("document_closed", "The document handle is no longer valid; list documents again.");
         var identity = Get(doc);
         return new
         {
@@ -58,11 +64,7 @@ public sealed class RevitDocumentRegistry
     {
         lock (_gate)
         {
-            foreach (var stale in _identities.Keys.Where(item => !item.IsValidObject).ToArray())
-            {
-                _generations.Close(_identities[stale].Session);
-                _identities.Remove(stale);
-            }
+            Purge();
             var fingerprint = Fingerprint(document);
             if (_identities.TryGetValue(document, out var identity))
             {
@@ -79,14 +81,47 @@ public sealed class RevitDocumentRegistry
         }
     }
 
+    private void Purge()
+    {
+        if (_identities.Keys.All(IsAlive)) return;
+        var alive = new Dictionary<Document, Identity>();
+        foreach (var pair in _identities)
+        {
+            if (IsAlive(pair.Key)) alive.Add(pair.Key, pair.Value);
+            else _generations.Close(pair.Value.Session);
+        }
+        _identities = alive;
+    }
+
+    private static bool IsAlive(Document? document)
+    {
+        if (document is null) return false;
+        try { return document.IsValidObject; }
+        catch (Autodesk.Revit.Exceptions.InvalidObjectException) { return false; }
+    }
+
+    private static Document? ActiveDocument(UIApplication uiapp)
+    {
+        try
+        {
+            var doc = uiapp.ActiveUIDocument?.Document;
+            return IsAlive(doc) ? doc : null;
+        }
+        catch (Autodesk.Revit.Exceptions.InvalidObjectException) { return null; }
+    }
+
     private static string Fingerprint(Document document) => string.Join("|",
         document.PathName ?? string.Empty,
         document.Title,
         document.IsFamilyDocument,
         document.IsWorkshared);
 
-    private static bool SameDocument(Document? left, Document? right) =>
-        left is not null && right is not null && left.Equals(right);
+    private static bool SameDocument(Document? left, Document? right)
+    {
+        if (left is null || right is null) return false;
+        try { return left.Equals(right); }
+        catch (Autodesk.Revit.Exceptions.InvalidObjectException) { return false; }
+    }
 }
 
 public sealed class RequestDispatchException(string code, string message, string? remediation = null) : Exception(message)
