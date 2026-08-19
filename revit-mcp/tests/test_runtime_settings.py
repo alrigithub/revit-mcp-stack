@@ -37,6 +37,36 @@ class RuntimeSettingsTests(unittest.TestCase):
             self.assertEqual(base / "tools", settings.saved_tools_root)
             self.assertIsNotNone(settings.error)
 
+    def test_saved_tools_paths_are_loaded_in_order(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            first = base / "team"
+            second = base / "shared"
+            (base / "settings.json").write_text(json.dumps({
+                "saved_tools_paths": [str(first), str(second)],
+            }), encoding="utf-8")
+            settings = load_settings(base)
+            self.assertEqual((first, second), settings.saved_tools_paths)
+            self.assertEqual(base / "tools", settings.saved_tools_root)
+            self.assertIsNone(settings.error)
+
+    def test_saved_tools_paths_null_means_empty(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            (base / "settings.json").write_text('{"saved_tools_paths": null}', encoding="utf-8")
+            settings = load_settings(base)
+            self.assertEqual((), settings.saved_tools_paths)
+            self.assertIsNone(settings.error)
+
+    def test_relative_saved_tools_path_falls_back_with_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            (base / "settings.json").write_text('{"saved_tools_paths": ["relative/path"]}', encoding="utf-8")
+            settings = load_settings(base)
+            self.assertEqual((), settings.saved_tools_paths)
+            self.assertEqual(base / "tools", settings.saved_tools_root)
+            self.assertIsNotNone(settings.error)
+
     def test_disabled_mcp_tools_are_hidden_and_rejected(self):
         from revit_mcp import server
 

@@ -208,7 +208,7 @@ def reload_tool_provider(pid: int, timeout_ms: int = 30_000) -> dict[str, Any]:
 
 @mcp.tool()
 def list_saved_tools(name: str | None = None) -> dict[str, Any]:
-    """List saved tools and the configured registry root. Folder paths are group names. Disabled tools remain visible but cannot run. Without `name`, returns every tool plus invalid manifests; with a tool ID such as `qa/list_levels`, returns full detail. Read this before creating saved-tool files so they go to the configured root."""
+    """List saved tools and the configured registry roots (`roots` is ordered; on duplicate tool IDs the first root wins and later copies appear under `shadowed`). Folder paths are group names. Disabled tools remain visible but cannot run. Without `name`, returns every tool plus invalid manifests; with a tool ID such as `qa/list_levels`, returns full detail. Read this before creating saved-tool files: new files go in the primary root (`root`), the first entry of `roots`."""
     if name is None:
         return saved_tools.list_saved_tools()
     return saved_tools.describe_saved_tool(saved_tools.load_saved_tool(name, allow_disabled=True))

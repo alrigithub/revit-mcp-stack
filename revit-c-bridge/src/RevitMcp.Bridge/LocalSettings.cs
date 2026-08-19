@@ -5,7 +5,12 @@ using System.Text.RegularExpressions;
 
 namespace RevitMcp.Bridge;
 
-internal sealed record LocalSettings(string SavedToolsRoot, HashSet<string> DisabledMcpTools, string? Error = null);
+internal sealed record LocalSettings(string SavedToolsRoot, List<string> SavedToolsPaths, HashSet<string> DisabledMcpTools, string? Error = null)
+{
+    /// <summary>Ordered search roots: the primary (writable) root first, then saved_tools_paths, deduplicated.</summary>
+    public IReadOnlyList<string> SearchRoots =>
+        new[] { SavedToolsRoot }.Concat(SavedToolsPaths).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+}
 
 internal static partial class LocalSettingsStore
 {
@@ -21,7 +26,7 @@ internal static partial class LocalSettingsStore
     {
         lock (Gate)
         {
-            if (!File.Exists(SettingsPath)) return new(DefaultSavedToolsRoot, []);
+            if (!File.Exists(SettingsPath)) return new(DefaultSavedToolsRoot, [], []);
             try
             {
                 var stored = JsonSerializer.Deserialize<StoredSettings>(File.ReadAllText(SettingsPath));
@@ -30,15 +35,23 @@ internal static partial class LocalSettingsStore
                     : Environment.ExpandEnvironmentVariables(stored.SavedToolsRoot);
                 if (!Path.IsPathFullyQualified(configured)) throw new InvalidDataException("saved_tools_root must be an absolute path.");
                 var root = Path.GetFullPath(configured);
+                var paths = new List<string>();
+                foreach (var entry in stored?.SavedToolsPaths ?? [])
+                {
+                    if (string.IsNullOrWhiteSpace(entry)) throw new InvalidDataException("saved_tools_paths entries must be non-empty absolute paths.");
+                    var expanded = Environment.ExpandEnvironmentVariables(entry);
+                    if (!Path.IsPathFullyQualified(expanded)) throw new InvalidDataException("saved_tools_paths entries must be absolute paths.");
+                    paths.Add(Path.GetFullPath(expanded));
+                }
                 var disabledNames = stored?.DisabledMcpTools ?? [];
                 if (disabledNames.Any(name => !ToolNamePattern().IsMatch(name)))
                     throw new InvalidDataException("disabled_mcp_tools contains an invalid tool name.");
                 var disabled = disabledNames.ToHashSet(StringComparer.Ordinal);
-                return new(root, disabled);
+                return new(root, paths, disabled);
             }
             catch (Exception ex)
             {
-                return new(DefaultSavedToolsRoot, [], ex.Message);
+                return new(DefaultSavedToolsRoot, [], [], ex.Message);
             }
         }
     }
@@ -50,7 +63,7 @@ internal static partial class LocalSettingsStore
         var root = Path.GetFullPath(configured);
         Directory.CreateDirectory(root);
         var settings = Load();
-        Save(new(root, settings.DisabledMcpTools));
+        Save(settings with { SavedToolsRoot = root });
     }
 
     public static void SetMcpToolEnabled(string name, bool enabled)
@@ -60,7 +73,7 @@ internal static partial class LocalSettingsStore
         var disabled = new HashSet<string>(settings.DisabledMcpTools, StringComparer.Ordinal);
         if (enabled) disabled.Remove(name);
         else disabled.Add(name);
-        Save(new(settings.SavedToolsRoot, disabled));
+        Save(settings with { DisabledMcpTools = disabled });
     }
 
     public static bool GroupsEnabled(string root, string directory)
@@ -107,7 +120,7 @@ internal static partial class LocalSettingsStore
         lock (Gate)
         {
             Directory.CreateDirectory(BaseRoot);
-            var stored = new StoredSettings(settings.SavedToolsRoot, settings.DisabledMcpTools.Order().ToList());
+            var stored = new StoredSettings(settings.SavedToolsRoot, settings.SavedToolsPaths, settings.DisabledMcpTools.Order().ToList());
             var staging = SettingsPath + ".tmp";
             File.WriteAllText(staging, JsonSerializer.Serialize(stored, JsonOptions));
             File.Move(staging, SettingsPath, true);
@@ -116,6 +129,7 @@ internal static partial class LocalSettingsStore
 
     private sealed record StoredSettings(
         [property: JsonPropertyName("saved_tools_root")] string? SavedToolsRoot,
+        [property: JsonPropertyName("saved_tools_paths")] List<string>? SavedToolsPaths,
         [property: JsonPropertyName("disabled_mcp_tools")] List<string>? DisabledMcpTools);
 
     [GeneratedRegex("^[a-z][a-z0-9_]{0,63}$", RegexOptions.CultureInvariant)]

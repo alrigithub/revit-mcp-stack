@@ -28,6 +28,22 @@ Each tool is two files with the same stem: a manifest (`name.json`) and a script
 
 Validated params reach the script as its `request` object. Python scripts follow the IronPython 2.7 dialect: no f-strings, `%`/`.format()` only, JSON-safe `_result`, `int()` around `ElementId.Value`.
 
+## Multiple roots
+
+Besides the primary root, `%LOCALAPPDATA%\RevitMcp\settings.json` can list extra read-only search paths, pyRevit-style:
+
+```json
+{
+  "saved_tools_root": "C:\\Users\\me\\AppData\\Local\\RevitMcp\\tools",
+  "saved_tools_paths": ["D:\\team\\revit-tools", "\\\\server\\share\\revit-tools"]
+}
+```
+
+- Search order is `saved_tools_root` first, then `saved_tools_paths` in listed order.
+- On duplicate tool IDs the first root wins; `list_saved_tools` reports the hidden copies under `shadowed`.
+- A disabled tool does not fall through to a later root's copy — disabling always disables.
+- New tools are still created in the primary root; that's also where `sync.ps1 -Tools` deploys and what **Activity → Settings** edits. Extra paths are edited in `settings.json` directly.
+
 ## Groups and enable/disable
 
 - Subfolders are groups (`annotation/tag_rooms` is tool `tag_rooms` in group `annotation`); folder names follow the same name pattern.

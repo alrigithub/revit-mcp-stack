@@ -50,6 +50,8 @@ if (Test-Path -LiteralPath $settingsPath) {
     try {
         $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
         Write-Host "  saved_tools_root: $($settings.saved_tools_root)"
+        $extraPaths = @($settings.saved_tools_paths)
+        if ($extraPaths.Count) { Write-Host "  saved_tools_paths: $($extraPaths -join '; ')" }
         $disabled = @($settings.disabled_mcp_tools)
         Write-Host "  disabled_mcp_tools: $(if ($disabled.Count) { $disabled -join ', ' } else { 'none' })"
     }

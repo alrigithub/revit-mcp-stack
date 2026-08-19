@@ -2,7 +2,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from revit_mcp.runtime_settings import RuntimeSettings
 from revit_mcp.saved_tools import list_saved_tools, load_saved_tool, validate_arguments
 
 
@@ -102,6 +104,55 @@ class SavedToolsTests(unittest.TestCase):
             listing = {tool["id"]: tool for tool in list_saved_tools(root)["tools"]}
             self.assertFalse(listing["one"]["enabled"])
             self.assertTrue(listing["two"]["enabled"])
+
+    def test_multiple_roots_are_merged_first_root_wins(self):
+        with tempfile.TemporaryDirectory() as folder:
+            primary = Path(folder) / "primary"
+            extra = Path(folder) / "extra"
+            primary.mkdir()
+            extra.mkdir()
+            write_tool(primary, "shared", manifest("shared"), "_result = {'from': 'primary'}")
+            write_tool(extra, "shared", manifest("shared"), "_result = {'from': 'extra'}")
+            write_tool(extra, "extra_only", manifest("extra_only"))
+            fake = RuntimeSettings(Path("settings.json"), primary, frozenset(), saved_tools_paths=(extra,))
+            with patch("revit_mcp.saved_tools.load_settings", return_value=fake):
+                listing = list_saved_tools()
+                self.assertEqual([str(primary), str(extra)], listing["roots"])
+                by_id = {tool["id"]: tool for tool in listing["tools"]}
+                self.assertEqual({"shared", "extra_only"}, set(by_id))
+                self.assertEqual(str(primary), by_id["shared"]["root"])
+                self.assertEqual(str(extra), by_id["extra_only"]["root"])
+                self.assertEqual([{"id": "shared", "root": str(extra), "shadowed_by": str(primary)}],
+                                 listing["shadowed"])
+                self.assertEqual("_result = {'from': 'primary'}", load_saved_tool("shared").source)
+                self.assertEqual("extra_only", load_saved_tool("extra_only").id)
+
+    def test_disabled_tool_does_not_fall_through_to_later_root(self):
+        with tempfile.TemporaryDirectory() as folder:
+            primary = Path(folder) / "primary"
+            extra = Path(folder) / "extra"
+            primary.mkdir()
+            extra.mkdir()
+            write_tool(primary, "shared", manifest("shared"))
+            write_tool(extra, "shared", manifest("shared"))
+            (primary / "shared.disabled").write_text("", encoding="utf-8")
+            fake = RuntimeSettings(Path("settings.json"), primary, frozenset(), saved_tools_paths=(extra,))
+            with patch("revit_mcp.saved_tools.load_settings", return_value=fake):
+                with self.assertRaises(PermissionError):
+                    load_saved_tool("shared")
+
+    def test_missing_extra_root_is_skipped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            primary = Path(folder) / "primary"
+            primary.mkdir()
+            write_tool(primary, "one", manifest("one"))
+            absent = Path(folder) / "does_not_exist"
+            fake = RuntimeSettings(Path("settings.json"), primary, frozenset(), saved_tools_paths=(absent,))
+            with patch("revit_mcp.saved_tools.load_settings", return_value=fake):
+                listing = list_saved_tools()
+                self.assertEqual(["one"], [tool["id"] for tool in listing["tools"]])
+                self.assertEqual([str(primary), str(absent)], listing["roots"])
+                self.assertEqual([], listing["shadowed"])
 
     def test_argument_validation(self):
         with tempfile.TemporaryDirectory() as folder:

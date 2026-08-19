@@ -552,63 +552,81 @@ public sealed class ActivityPane : Page, IDockablePaneProvider
 
     private void RefreshSaved()
     {
-        var root = SavedToolsRoot;
-        string[] manifests;
-        string[] markers;
-        try
+        var roots = LocalSettingsStore.Load().SearchRoots;
+        var manifestsByRoot = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        var markers = new List<string>();
+        foreach (var root in roots)
         {
-            manifests = Directory.Exists(root) ? Directory.GetFiles(root, "*.json", SearchOption.AllDirectories) : [];
+            try
+            {
+                manifestsByRoot[root] = Directory.Exists(root) ? Directory.GetFiles(root, "*.json", SearchOption.AllDirectories) : [];
+            }
+            catch { manifestsByRoot[root] = []; }
+            try { if (Directory.Exists(root)) markers.AddRange(Directory.GetFiles(root, "*.disabled", SearchOption.AllDirectories)); }
+            catch { }
         }
-        catch { manifests = []; }
-        try { markers = Directory.Exists(root) ? Directory.GetFiles(root, "*.disabled", SearchOption.AllDirectories) : []; }
-        catch { markers = []; }
+        var allManifests = manifestsByRoot.Values.SelectMany(paths => paths).ToArray();
         var stamp = default(DateTime);
-        foreach (var path in manifests.Concat(markers).Append(LocalSettingsStore.SettingsPath))
+        foreach (var path in allManifests.Concat(markers).Append(LocalSettingsStore.SettingsPath))
         {
             if (!File.Exists(path)) continue;
             var written = File.GetLastWriteTimeUtc(path);
             if (written > stamp) stamp = written;
         }
-        if (stamp == _savedStamp && manifests.Length == _savedCount && _activity.Items.Count > 0) return;
+        if (stamp == _savedStamp && allManifests.Length == _savedCount && _activity.Items.Count > 0) return;
         _savedStamp = stamp;
-        _savedCount = manifests.Length;
+        _savedCount = allManifests.Length;
 
         _activity.Items.Clear();
         var shown = 0;
-        foreach (var path in manifests.Where(path => string.Equals(System.IO.Path.GetDirectoryName(path), root, StringComparison.OrdinalIgnoreCase))
-                     .OrderBy(System.IO.Path.GetFileName))
+        foreach (var root in roots)
         {
-            _activity.Items.Add(SavedItem(root, path, ReadSavedManifest(path)));
-            shown++;
-        }
-
-        var groupSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var manifestPath in manifests)
-        {
-            var directory = System.IO.Path.GetDirectoryName(manifestPath);
-            while (directory is not null && !string.Equals(directory, root, StringComparison.OrdinalIgnoreCase))
+            var manifests = manifestsByRoot[root];
+            if (roots.Count > 1)
             {
-                groupSet.Add(directory);
-                directory = Directory.GetParent(directory)?.FullName;
+                var header = new ListBoxItem { IsHitTestVisible = false };
+                var label = ThemedText(root, SecondaryTextKey);
+                label.TextWrapping = TextWrapping.Wrap;
+                label.Margin = new Thickness(4, 8, 4, 2);
+                header.Content = label;
+                _activity.Items.Add(header);
             }
-        }
-        var groups = groupSet
-            .OrderBy(directory => System.IO.Path.GetRelativePath(root, directory), StringComparer.OrdinalIgnoreCase);
-        foreach (var group in groups)
-        {
-            _activity.Items.Add(SavedGroupItem(root, group));
-            foreach (var path in manifests.Where(path => string.Equals(System.IO.Path.GetDirectoryName(path), group, StringComparison.OrdinalIgnoreCase))
+            foreach (var path in manifests.Where(path => string.Equals(System.IO.Path.GetDirectoryName(path), root, StringComparison.OrdinalIgnoreCase))
                          .OrderBy(System.IO.Path.GetFileName))
             {
                 _activity.Items.Add(SavedItem(root, path, ReadSavedManifest(path)));
                 shown++;
             }
+
+            var groupSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var manifestPath in manifests)
+            {
+                var directory = System.IO.Path.GetDirectoryName(manifestPath);
+                while (directory is not null && !string.Equals(directory, root, StringComparison.OrdinalIgnoreCase))
+                {
+                    groupSet.Add(directory);
+                    directory = Directory.GetParent(directory)?.FullName;
+                }
+            }
+            var groups = groupSet
+                .OrderBy(directory => System.IO.Path.GetRelativePath(root, directory), StringComparer.OrdinalIgnoreCase);
+            foreach (var group in groups)
+            {
+                _activity.Items.Add(SavedGroupItem(root, group));
+                foreach (var path in manifests.Where(path => string.Equals(System.IO.Path.GetDirectoryName(path), group, StringComparison.OrdinalIgnoreCase))
+                             .OrderBy(System.IO.Path.GetFileName))
+                {
+                    _activity.Items.Add(SavedItem(root, path, ReadSavedManifest(path)));
+                    shown++;
+                }
+            }
         }
         _totals.Text = shown == 0 ? "" : shown + " saved tools";
         if (shown == 0)
         {
+            _activity.Items.Clear();
             var item = new ListBoxItem();
-            var message = ThemedText("No saved tools yet. Proven scripts land here as manifest + script pairs in " + root + " and are usable immediately.", SecondaryTextKey);
+            var message = ThemedText("No saved tools yet. Proven scripts land here as manifest + script pairs in " + roots[0] + " and are usable immediately.", SecondaryTextKey);
             message.TextWrapping = TextWrapping.Wrap;
             message.Margin = new Thickness(4, 8, 4, 8);
             item.Content = message;

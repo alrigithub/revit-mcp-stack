@@ -16,6 +16,7 @@ class RuntimeSettings:
     saved_tools_root: Path
     disabled_mcp_tools: frozenset[str]
     error: str | None = None
+    saved_tools_paths: tuple[Path, ...] = ()
 
 
 def default_base_root() -> Path:
@@ -52,13 +53,22 @@ def load_settings(base_root: Path | None = None) -> RuntimeSettings:
             root = Path(os.path.expandvars(root_value)).expanduser()
             if not root.is_absolute():
                 raise ValueError("saved_tools_root must be an absolute path")
+        paths_value = raw.get("saved_tools_paths") or []
+        if not isinstance(paths_value, list) or not all(isinstance(item, str) and item.strip() for item in paths_value):
+            raise ValueError("saved_tools_paths must be a list of non-empty absolute paths")
+        extra_paths: list[Path] = []
+        for item in paths_value:
+            candidate = Path(os.path.expandvars(item)).expanduser()
+            if not candidate.is_absolute():
+                raise ValueError("saved_tools_paths entries must be absolute paths: %r" % item)
+            extra_paths.append(candidate)
         disabled_value = raw.get("disabled_mcp_tools", [])
         if not isinstance(disabled_value, list) or not all(isinstance(item, str) for item in disabled_value):
             raise ValueError("disabled_mcp_tools must be a list of tool names")
         invalid = sorted(name for name in disabled_value if not TOOL_NAME_PATTERN.fullmatch(name))
         if invalid:
             raise ValueError("invalid disabled MCP tool names: %s" % invalid)
-        return RuntimeSettings(path, root, frozenset(disabled_value))
+        return RuntimeSettings(path, root, frozenset(disabled_value), saved_tools_paths=tuple(extra_paths))
     except (OSError, ValueError, json.JSONDecodeError) as error:
         return RuntimeSettings(path, fallback, frozenset(), str(error))
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,23 @@ class SavedTool:
 
 def registry_root() -> Path:
     return load_settings().saved_tools_root
+
+
+def registry_roots() -> tuple[Path, ...]:
+    """Ordered search roots: the primary (writable) root first, then saved_tools_paths, deduplicated."""
+    settings = load_settings()
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for candidate in (settings.saved_tools_root, *settings.saved_tools_paths):
+        key = os.path.normcase(os.path.normpath(str(candidate)))
+        if key not in seen:
+            seen.add(key)
+            roots.append(candidate)
+    return tuple(roots)
+
+
+def _resolve_roots(root: Path | None) -> tuple[Path, ...]:
+    return (root,) if root is not None else registry_roots()
 
 
 def _relative_id(manifest_path: Path, root: Path) -> tuple[str, str]:
@@ -122,33 +140,59 @@ def _load_manifest(manifest_path: Path, root: Path) -> SavedTool:
 
 
 def list_saved_tools(root: Path | None = None) -> dict[str, Any]:
-    root = root or registry_root()
+    roots = _resolve_roots(root)
     tools: list[dict[str, Any]] = []
     invalid: list[dict[str, str]] = []
-    manifests = sorted(root.rglob("*.json")) if root.exists() else []
-    for path in manifests[:MAX_LISTED_TOOLS]:
-        try:
-            tool = _load_manifest(path, root)
-            tools.append({"id": tool.id, "name": tool.name, "group": tool.group,
-                          "description": tool.description, "engine": tool.engine,
-                          "enabled": tool.enabled, "disabled_reason": tool.disabled_reason})
-        except (OSError, ValueError, json.JSONDecodeError) as ex:
-            invalid.append({"file": path.relative_to(root).as_posix(), "reason": str(ex)})
-    result: dict[str, Any] = {"root": str(root), "tools": tools, "invalid": invalid}
-    if len(manifests) > MAX_LISTED_TOOLS:
+    shadowed: list[dict[str, str]] = []
+    owner_by_id: dict[str, str] = {}
+    seen_files: set[str] = set()
+    processed = 0
+    truncated = False
+    for base in roots:
+        manifests = sorted(base.rglob("*.json")) if base.exists() else []
+        for path in manifests:
+            file_key = os.path.normcase(os.path.normpath(str(path)))
+            if file_key in seen_files:
+                continue
+            seen_files.add(file_key)
+            if processed >= MAX_LISTED_TOOLS:
+                truncated = True
+                break
+            processed += 1
+            try:
+                tool = _load_manifest(path, base)
+                if tool.id in owner_by_id:
+                    shadowed.append({"id": tool.id, "root": str(base), "shadowed_by": owner_by_id[tool.id]})
+                    continue
+                owner_by_id[tool.id] = str(base)
+                tools.append({"id": tool.id, "name": tool.name, "group": tool.group,
+                              "description": tool.description, "engine": tool.engine,
+                              "enabled": tool.enabled, "disabled_reason": tool.disabled_reason,
+                              "root": str(base)})
+            except (OSError, ValueError, json.JSONDecodeError) as ex:
+                invalid.append({"file": path.relative_to(base).as_posix(), "reason": str(ex), "root": str(base)})
+        if truncated:
+            break
+    result: dict[str, Any] = {"root": str(roots[0]), "roots": [str(base) for base in roots],
+                              "tools": tools, "invalid": invalid, "shadowed": shadowed}
+    if truncated:
         result["truncated"] = True
     return result
 
 
 def load_saved_tool(name: str, root: Path | None = None, allow_disabled: bool = False) -> SavedTool:
-    root = root or registry_root()
-    manifest_path = _manifest_path(name or "", root)
-    if not manifest_path.is_file():
-        raise LookupError("no saved tool named %r in %s" % (name, root))
-    tool = _load_manifest(manifest_path, root)
-    if not tool.enabled and not allow_disabled:
-        raise PermissionError("saved tool %r is disabled: %s" % (tool.id, tool.disabled_reason))
-    return tool
+    roots = _resolve_roots(root)
+    for base in roots:
+        manifest_path = _manifest_path(name or "", base)
+        if not manifest_path.is_file():
+            continue
+        # First root owning the id wins; a disabled first hit does NOT fall through to a
+        # later root — a lower-precedence script must never run in place of a disabled one.
+        tool = _load_manifest(manifest_path, base)
+        if not tool.enabled and not allow_disabled:
+            raise PermissionError("saved tool %r is disabled: %s" % (tool.id, tool.disabled_reason))
+        return tool
+    raise LookupError("no saved tool named %r in %s" % (name, ", ".join(str(base) for base in roots)))
 
 
 def describe_saved_tool(tool: SavedTool) -> dict[str, Any]:
