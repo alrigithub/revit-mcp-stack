@@ -6,8 +6,8 @@
 # rewritten for IronPython 2.7.
 
 from Autodesk.Revit.DB import (
-    FilteredElementCollector, FamilyInstance, Family, Level, View, ViewSheet,
-    RevitLinkInstance, ImportInstance, UnitUtils, UnitTypeId,
+    Element, FilteredElementCollector, FamilyInstance, Family, Level, View,
+    ViewSheet, RevitLinkInstance, ImportInstance, UnitUtils, UnitTypeId,
 )
 
 MAX_TYPES = 50
@@ -46,7 +46,8 @@ def _main():
             family = symbol.Family
             family_name = family.Name if family is not None else ""
             category_name = category.Name if category is not None else ""
-            key = (family_name, symbol.Name, category_name)
+            # symbol.Name raises MissingMemberException in IronPython 2.7
+            key = (family_name, Element.Name.GetValue(symbol), category_name)
             type_counts[key] = type_counts.get(key, 0) + 1
 
     levels = []

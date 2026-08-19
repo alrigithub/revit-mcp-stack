@@ -12,6 +12,8 @@ Local-only Revit MCP stack, three components in one repo:
 
 Security model: current-user-only pipe + per-process CSPRNG nonce, bounded frames, redacted errors, no listeners, hash-locked deps. Keep every change inside that posture.
 
+Before driving the live bridge, read `GOTCHAS.md` — operational traps (EditFamily poisons the session, stale doc handles need a Revit restart, IronPython `.Name`/encoding pitfalls).
+
 ## Architecture that spans files
 
 - **Request path**: MCP tool → `server.py` → `client.py`/`winpipe.py` (framed JSON over pipe) → `PipeServer.cs` (nonce check, admission, ledger, queue) → `RevitRequestHandler.cs` on Revit's UI thread via ExternalEvent → transaction per `transaction_mode` (`read`/`auto`/`manual`/`group`) → provider.

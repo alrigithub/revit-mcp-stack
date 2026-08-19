@@ -13,6 +13,13 @@ from System.Collections.Generic import List as NetList
 
 MM = 304.8
 
+
+def type_name(element_type):
+    # FamilySymbol.Name raises MissingMemberException in IronPython 2.7;
+    # read the name through the base Element property instead.
+    return DB.Element.Name.GetValue(element_type)
+
+
 x_min = float(request.get("x_min_mm"))
 x_max = float(request.get("x_max_mm"))
 y_min = float(request.get("y_min_mm"))
@@ -69,12 +76,12 @@ beam_type = None
 if beam_type_name:
     wanted = beam_type_name.lower()
     for fs in symbols:
-        full = "%s: %s" % (fs.Family.Name, fs.Name)
+        full = "%s: %s" % (fs.Family.Name, type_name(fs))
         if wanted in full.lower():
             beam_type = fs
             break
     if beam_type is None:
-        names = ", ".join(["%s: %s" % (fs.Family.Name, fs.Name) for fs in symbols[:30]])
+        names = ", ".join(["%s: %s" % (fs.Family.Name, type_name(fs)) for fs in symbols[:30]])
         raise Exception("beam type matching %r not found. Loaded types: %s" % (beam_type_name, names))
 else:
     for fs in symbols:
@@ -114,7 +121,7 @@ _result = {
     "beam_count": len(beam_ids),
     "beam_ids": beam_ids,
     "level": level.Name,
-    "beam_type": "%s: %s" % (beam_type.Family.Name, beam_type.Name),
+    "beam_type": "%s: %s" % (beam_type.Family.Name, type_name(beam_type)),
     "spacing_mm": spacing,
     "direction": direction,
     "justify": justify,

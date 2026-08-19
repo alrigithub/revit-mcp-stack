@@ -4,7 +4,7 @@
 # Ported from mcp-servers-for-revit (MIT, (c) 2026 sparx-fire), rewritten for IronPython 2.7.
 # Bridge runs this in one auto transaction - do not open transactions here.
 
-from Autodesk.Revit.DB import (Color, ElementId, FillPatternElement,
+from Autodesk.Revit.DB import (Color, Element, ElementId, FillPatternElement,
                                FilteredElementCollector, OverrideGraphicSettings,
                                StorageType)
 
@@ -61,7 +61,10 @@ def parameter_value_string(parameter):
         if target == ElementId.InvalidElementId:
             return "None"
         element = doc.GetElement(target)
-        return element.Name if element is not None else str(int(target.Value))
+        if element is None:
+            return str(int(target.Value))
+        # .Name raises MissingMemberException on element types in IronPython 2.7
+        return Element.Name.GetValue(element)
     return "None"
 
 
