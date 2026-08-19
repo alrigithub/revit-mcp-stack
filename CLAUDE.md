@@ -69,7 +69,7 @@ The repo is the source of truth, but the deployed copies must be kept in sync af
 
 Bridge changes cost a Revit restart; design around it. Prefer, in order: saved tools (no restart at all) → Python provider edits (Python toggle click) → Roslyn provider (reload_tool_provider) → bridge rebuild (restart). Batch bridge changes so one install carries several.
 
-Git: private origin `alrigithub/revit-mcp-stack`. Commit at milestones together with the version bump so `version.txt` stays traceable to code.
+Git: origin `alrigithub/revit-mcp-stack` (public). Commit at milestones together with the version bump so `version.txt` stays traceable to code.
 
 ## Roadmap
 
