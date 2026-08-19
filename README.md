@@ -34,9 +34,9 @@ Each folder's README has its build, test, and install detail.
 ## Install
 
 1. Close Revit — the add-in DLL is locked while it runs.
-2. Run `./package-v0.9.ps1` once to build and stage the install artifacts (skip if you unzipped a release build).
-3. Run `./install-v0.9.ps1 -RevitYear 2025`. No elevation needed.
-4. Merge the generated `%LOCALAPPDATA%\RevitMcp\mcp\0.9.0\client-config.json` into your MCP client's configuration.
+2. Run `./package-release.ps1` once to build and stage the install artifacts (skip if you unzipped a release build).
+3. Run `./install.ps1 -RevitYear 2025`. No elevation needed.
+4. Merge the generated `%LOCALAPPDATA%\RevitMcp\mcp\client-config.json` into your MCP client's configuration.
 5. Restart Revit.
 
 Revit 2025 is the live-certified target. 2026 and 2027 build (`-RevitYear 2026|2027`) but are not certified yet.

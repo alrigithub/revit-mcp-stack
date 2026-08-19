@@ -1,4 +1,4 @@
-param([string]$PackagePath, [string]$InstallRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RevitMcp/mcp/0.9.0'))
+param([string]$PackagePath, [string]$InstallRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RevitMcp/mcp'))
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $PackagePath) { $PackagePath = Join-Path $root 'artifacts' }

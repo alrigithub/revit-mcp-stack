@@ -9,7 +9,7 @@ import clr
 from System import Action, AppDomain, Guid
 
 ABI = "revit-mcp.python/1"
-BUILD_HASH = "revit-mcp-v0.9.0"
+BUILD_HASH = "revit-mcp-extension/1"
 _compiled = {}
 _compiled_order = []
 

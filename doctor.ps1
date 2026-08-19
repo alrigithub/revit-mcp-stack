@@ -18,16 +18,18 @@ Show 'bridge DLL' (Test-Path -LiteralPath (Join-Path $addins 'RevitMcp/RevitMcp.
 Show 'Roslyn provider DLL' (Test-Path -LiteralPath (Join-Path $addins 'RevitMcp/providers/roslyn/1/RevitMcp.RoslynProvider.dll'))
 
 Write-Host 'MCP server install'
-$mcpRoot = Join-Path $localAppData 'RevitMcp/mcp/0.9.0'
+$mcpRoot = Join-Path $localAppData 'RevitMcp/mcp'
 Show 'bundled Python runtime' (Test-Path -LiteralPath (Join-Path $mcpRoot 'runtime/Scripts/python.exe'))
 Show 'server source' (Test-Path -LiteralPath (Join-Path $mcpRoot 'revit_mcp/server.py'))
 Show 'client config' (Test-Path -LiteralPath (Join-Path $mcpRoot 'client-config.json'))
+if (Test-Path -LiteralPath (Join-Path $mcpRoot '0.9.0')) {
+    Write-Host '  ! legacy versioned install at mcp\0.9.0 - re-register the MCP client against mcp\ and delete it'
+}
 
 Write-Host 'pyRevit extension install'
 $extension = Join-Path $appData 'pyRevit/Extensions/RevitMCP.extension'
 Show 'startup.py' (Test-Path -LiteralPath (Join-Path $extension 'startup.py'))
-Show 'Python ON button' (Test-Path -LiteralPath (Join-Path $extension 'Revit MCP.tab/Runtime.panel/Python ON.pushbutton/script.py'))
-Show 'Python OFF button' (Test-Path -LiteralPath (Join-Path $extension 'Revit MCP.tab/Runtime.panel/Python OFF.pushbutton/script.py'))
+Show 'provider module' (Test-Path -LiteralPath (Join-Path $extension 'lib/revit_mcp_provider.py'))
 
 Write-Host 'Live bridge instances'
 $records = @(Get-ChildItem -LiteralPath (Join-Path $localAppData 'RevitMcp/instances') -Filter '*.json' -ErrorAction SilentlyContinue)

@@ -13,7 +13,7 @@ public sealed class RoslynCompilerProvider : IRoslynCompilerProvider
     private readonly Dictionary<string, CompileResult> _cache = new(StringComparer.Ordinal);
     private readonly Queue<string> _order = new();
     public string AbiVersion => ProtocolConstants.RoslynAbi;
-    public string ProviderVersion => "0.9.0+roslyn-4.11.0";
+    public string ProviderVersion => "roslyn-4.11.0";
 
     public CompileResult Compile(CompileRequest request)
     {

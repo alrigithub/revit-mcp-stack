@@ -10,11 +10,11 @@ The transport is a small `ctypes` wrapper over `WaitNamedPipeW`, `CreateFileW`, 
 ./scripts/test.ps1
 ```
 
-That uses `python` from PATH. To test against the deployed environment, use the bundled runtime: `%LOCALAPPDATA%\RevitMcp\mcp\0.9.0\runtime\Scripts\python.exe` with `PYTHONPATH=src`.
+That uses `python` from PATH. To test against the deployed environment, use the bundled runtime: `%LOCALAPPDATA%\RevitMcp\mcp\runtime\Scripts\python.exe` with `PYTHONPATH=src`.
 
 ## Deploy and cost of a change
 
-The deployed copy at `%LOCALAPPDATA%\RevitMcp\mcp\0.9.0\revit_mcp\` is not rebuilt automatically. After editing `src/revit_mcp`, run `../sync.ps1` from the repo root; changes load when the MCP client restarts its stdio server. The package version stays 0.9.0 because that path is baked into the MCP client registration.
+The deployed copy at `%LOCALAPPDATA%\RevitMcp\mcp\revit_mcp\` is not rebuilt automatically. After editing `src/revit_mcp`, run `../sync.ps1` from the repo root; changes load when the MCP client restarts its stdio server. The install path is version-independent on purpose — MCP client registrations point at it, and a version in the path would break them on every release.
 
 ## Reproducible package
 

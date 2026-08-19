@@ -31,7 +31,7 @@ Repo folder of prebuilt saved tools (manifest+script pairs, subfolders are group
 
 ## Versioning
 
-`revit-c-bridge/version.txt` is the single source of truth; `Directory.Build.props` stamps it into the DLL and the pane footer displays the *loaded* assembly's version. `package.ps1` ships the current number then auto-advances the file. The Python package stays at 0.9.0 because its deployed path (`...\mcp\0.9.0\`) is baked into the MCP registration.
+`revit-c-bridge/version.txt` is the single source of truth for the whole stack; `Directory.Build.props` stamps it into the DLL and the pane footer displays the *loaded* assembly's version. `package.ps1` ships the current number then auto-advances the file; the root `package-release.ps1` reads it BEFORE that advance and names the bundle after it. The Python package version, `__init__.__version__`, and the three sbom.json files follow version.txt at milestones (update them with the milestone commit, not per build). The install path `%LOCALAPPDATA%\RevitMcp\mcp\` is deliberately version-free so MCP client registrations never break on a release.
 
 ## Commands
 
@@ -48,19 +48,19 @@ Python (always use the bundled runtime, not system Python):
 
 ```powershell
 cd revit-mcp
-$py = "$env:LOCALAPPDATA\RevitMcp\mcp\0.9.0\runtime\Scripts\python.exe"
+$py = "$env:LOCALAPPDATA\RevitMcp\mcp\runtime\Scripts\python.exe"
 $env:PYTHONPATH = "src"; & $py -m unittest discover -s tests          # all tests
 & $py -m unittest tests.test_saved_tools -v                           # single module
 cd ../revit-pyrevit-extention; & $py -m unittest discover -s tests    # extension tests
 ```
 
-Live smoke-testing against Revit: drive `revit_mcp.server` functions directly with `PYTHONPATH=%LOCALAPPDATA%\RevitMcp\mcp\0.9.0` (see the pattern: `list_revit_instances` → `list_documents` → call with pid/session/generation).
+Live smoke-testing against Revit: drive `revit_mcp.server` functions directly with `PYTHONPATH=%LOCALAPPDATA%\RevitMcp\mcp` (see the pattern: `list_revit_instances` → `list_documents` → call with pid/session/generation).
 
 ## Deployment mirrors (critical)
 
 The repo is the source of truth, but the deployed copies must be kept in sync after edits — nothing rebuilds them automatically. `./sync.ps1` copies the first two (`-Tools` adds the third); `./doctor.ps1` reports drift and install health:
 
-- `revit-mcp/src/revit_mcp/*` → `%LOCALAPPDATA%\RevitMcp\mcp\0.9.0\revit_mcp\` (plain source, copy files)
+- `revit-mcp/src/revit_mcp/*` → `%LOCALAPPDATA%\RevitMcp\mcp\revit_mcp\` (plain source, copy files)
 - `revit-pyrevit-extention/RevitMCP.extension/*` → `%APPDATA%\pyRevit\Extensions\RevitMCP.extension\` (then Python toggle ON in Revit to reload the provider)
 - `saved-tools/*` → `%LOCALAPPDATA%\RevitMcp\tools\` (only with `-Tools`; live at the next call)
 - bridge: package → close Revit → install → reopen (both Revit-side capabilities come back OFF)

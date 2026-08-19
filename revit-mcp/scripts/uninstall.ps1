@@ -1,4 +1,4 @@
-param([string]$InstallRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RevitMcp/mcp/0.9.0'))
+param([string]$InstallRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RevitMcp/mcp'))
 $ErrorActionPreference = 'Stop'
 $parent = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RevitMcp/mcp'))
 $target = [IO.Path]::GetFullPath($InstallRoot)

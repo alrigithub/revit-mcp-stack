@@ -30,7 +30,7 @@ public sealed class RoslynProviderHost : IDisposable
         {
             PrunePrepared();
             if (_provider is null) return new(false, null, null, _error ?? "Roslyn provider is not packaged.", string.Empty);
-            var result = _provider.Compile(new(source, _revitYear, ReferenceManifest(), "bridge-0.9"));
+            var result = _provider.Compile(new(source, _revitYear, ReferenceManifest(), "bridge/1"));
             if (result.Success)
             {
                 _prepared[requestId] = new(result, DateTimeOffset.UtcNow);
