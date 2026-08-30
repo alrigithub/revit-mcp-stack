@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/revit-c-bridge"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Revit API package versions are pinned per Revit year via
+      # $(RevitApiPackageVersion) in MSBuild props; never auto-bump.
+      - dependency-name: "Nice3point.Revit.Api.*"
+
+  - package-ecosystem: "pip"
+    directory: "/revit-mcp"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # mcp is intentionally pinned to 1.10.1 — 1.11+ pulls in pywin32,
+      # which the pure-ctypes pipe client deliberately avoids.
+      - dependency-name: "mcp"
