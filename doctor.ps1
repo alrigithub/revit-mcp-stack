@@ -17,6 +17,34 @@ Show 'RevitMcp.addin manifest' (Test-Path -LiteralPath (Join-Path $addins 'Revit
 Show 'bridge DLL' (Test-Path -LiteralPath (Join-Path $addins 'RevitMcp/RevitMcp.Bridge.dll'))
 Show 'Roslyn provider DLL' (Test-Path -LiteralPath (Join-Path $addins 'RevitMcp/providers/roslyn/1/RevitMcp.RoslynProvider.dll'))
 
+Write-Host 'Add-in manager (Revit 2025.3+)'
+$addinUtility = Join-Path $env:ProgramFiles "Autodesk/Revit $RevitYear/RevitAddInUtility.dll"
+if (Test-Path -LiteralPath $addinUtility) {
+    try {
+        Add-Type -LiteralPath $addinUtility -ErrorAction Stop
+        $managerType = [Type]::GetType('Autodesk.RevitAddIns.Manager.AddInsManagerSettings, RevitAddInUtility')
+        if ($null -eq $managerType) {
+            Write-Host '  add-in manager API not in this Revit build (pre-2025.3); skipped.'
+        }
+        else {
+            $manager = $managerType::Get()
+            if ($manager.DisableAllAddIns) { Write-Host '  ! DisableAllAddIns is ON - NO add-ins load next session.' }
+            $items = @($manager.GetAllAddInItemSettings() | Where-Object { $_.Name -match 'RevitMcp|3XN' })
+            if ($items.Count -eq 0) {
+                Write-Host '  bridge not registered with the add-in manager yet (normal before its first load).'
+            }
+            foreach ($item in $items) {
+                $state = if ($item.Disabled) { 'DISABLED' } else { 'enabled ' }
+                Write-Host ("  {0} {1} (vendor {2}, last load {3})" -f $state, $item.Name, $item.Vendor, $item.LoadTime)
+            }
+        }
+    }
+    catch { Write-Host "  add-in manager query failed: $($_.Exception.Message)" }
+}
+else {
+    Write-Host "  RevitAddInUtility.dll not found for Revit $RevitYear; skipped."
+}
+
 Write-Host 'MCP server install'
 $mcpRoot = Join-Path $localAppData 'RevitMcp/mcp'
 Show 'bundled Python runtime' (Test-Path -LiteralPath (Join-Path $mcpRoot 'runtime/Scripts/python.exe'))
