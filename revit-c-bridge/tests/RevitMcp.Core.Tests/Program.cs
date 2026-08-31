@@ -16,7 +16,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("DTOs are bounded and name omissions", DtoBounds),
     ("errors redact sensitive content", RedactionTest),
     ("discovery rejects PID reuse", PidReuse),
-    ("coordinator retains work after denied raise", LostWakeup)
+    ("coordinator retains work after denied raise", LostWakeup),
+    ("edit mode probe adapts to available document APIs", EditModeProbeTest),
+    ("failure severity probe uses LabelUtils when present", SeverityProbeTest)
 };
 
 var failures = 0;
@@ -142,6 +144,25 @@ static async Task LostWakeup()
     Equal(CoordinatorState.Idle, coordinator.State);
 }
 
+static Task EditModeProbeTest()
+{
+    Equal("SketchEdit", ReflectionProbes.ActiveEditMode(new FakeDocumentWithEditMode()));
+    Equal("None", ReflectionProbes.ActiveEditMode(new FakeDocumentBoolProbe(false)));
+    Equal("unknown", ReflectionProbes.ActiveEditMode(new FakeDocumentBoolProbe(true)));
+    True(ReflectionProbes.ActiveEditMode(new object()) is null);
+    True(ReflectionProbes.ActiveEditMode(null) is null);
+    return Task.CompletedTask;
+}
+
+static Task SeverityProbeTest()
+{
+    Equal("Localized Warning", ReflectionProbes.FailureSeverityName(typeof(FakeLabelUtils), FakeSeverity.Warning));
+    True(ReflectionProbes.FailureSeverityName(typeof(object), FakeSeverity.Warning) is null);
+    True(ReflectionProbes.FailureSeverityName(null, FakeSeverity.Warning) is null);
+    True(ReflectionProbes.FailureSeverityName(typeof(FakeLabelUtils), null) is null);
+    return Task.CompletedTask;
+}
+
 static RequestAdmission Admission(string id, string? key) => new(id, key, "run_csharp", "doc", 1, DateTimeOffset.UtcNow.AddMinutes(1), null, "read", JsonSerializer.SerializeToElement(new { }), 2);
 static void True(bool condition) { if (!condition) throw new Exception("Expected true."); }
 static void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new Exception($"Expected {expected}; got {actual}."); }
@@ -156,6 +177,23 @@ sealed class PartialReadStream(byte[] bytes, int maxChunk) : Stream
     public override int Read(byte[] buffer, int offset, int count) { var take = Math.Min(Math.Min(count, maxChunk), bytes.Length - _offset); if (take <= 0) return 0; Array.Copy(bytes, _offset, buffer, offset, take); _offset += take; return take; }
     public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) { var take = Math.Min(Math.Min(buffer.Length, maxChunk), bytes.Length - _offset); if (take <= 0) return ValueTask.FromResult(0); bytes.AsMemory(_offset, take).CopyTo(buffer); _offset += take; return ValueTask.FromResult(take); }
     public override void Flush() { } public override long Seek(long o, SeekOrigin s) => throw new NotSupportedException(); public override void SetLength(long v) => throw new NotSupportedException(); public override void Write(byte[] b, int o, int c) => throw new NotSupportedException();
+}
+
+enum FakeSeverity { Warning }
+
+sealed class FakeDocumentWithEditMode
+{
+    public string GetActiveEditMode() => "SketchEdit";
+}
+
+sealed class FakeDocumentBoolProbe(bool inEdit)
+{
+    public bool IsInEditMode() => inEdit;
+}
+
+static class FakeLabelUtils
+{
+    public static string GetFailureSeverityName(FakeSeverity severity) => severity == FakeSeverity.Warning ? "Localized Warning" : "?";
 }
 
 sealed class FakeRaiser : IExternalEventRaiser

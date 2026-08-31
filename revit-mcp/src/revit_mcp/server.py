@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from . import saved_tools
 from .client import BridgeClient
@@ -49,7 +49,7 @@ def _environment_note() -> str:
     return "\n".join(lines)
 
 
-class ConfigurableFastMCP(FastMCP):
+class ConfigurableMCPServer(MCPServer):
     async def list_all_tools(self):
         return await super().list_tools()
 
@@ -57,13 +57,14 @@ class ConfigurableFastMCP(FastMCP):
         disabled = load_settings().disabled_mcp_tools
         return [tool for tool in await self.list_all_tools() if tool.name not in disabled]
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]):
+    async def call_tool(self, name: str, arguments: dict[str, Any], context=None):
+        # v2 added the third `context` parameter; it must be accepted and forwarded
         if name in load_settings().disabled_mcp_tools:
             raise PermissionError("MCP tool %r is disabled in Revit MCP settings" % name)
-        return await super().call_tool(name, arguments)
+        return await super().call_tool(name, arguments, context)
 
 
-mcp = ConfigurableFastMCP("revit-mcp-local", instructions=AGENT_INSTRUCTIONS + "\n" + _environment_note())
+mcp = ConfigurableMCPServer("revit-mcp-local", instructions=AGENT_INSTRUCTIONS + "\n" + _environment_note())
 
 
 def _call(pid: int, tool: str, arguments: dict[str, Any] | None = None, document_session: str | None = None,
@@ -99,7 +100,7 @@ def get_request_status(pid: int, request_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 def get_active_context(pid: int, timeout_ms: int = 30_000) -> dict[str, Any]:
-    """Return the active Revit document/view context."""
+    """Return the active Revit document/view context. `edit_mode` reports Revit's active edit mode: "None" means no edit mode is open; any other value (family/sketch/group editing) means mutations will misbehave until the user exits it; null means this Revit build (pre-2025.3) cannot report it."""
     return _call(pid, "get_active_context", timeout_ms=timeout_ms)
 
 
@@ -247,7 +248,7 @@ def write_tools_manifest(root: Path | None = None) -> Path:
         "written_utc": datetime.now(timezone.utc).isoformat(),
         "server": "revit-mcp-local",
         "tools": [{"name": tool.name, "description": tool.description or "",
-                   "params": list((tool.inputSchema or {}).get("properties", {}))} for tool in tools],
+                   "params": list((tool.input_schema or {}).get("properties", {}))} for tool in tools],
     }
     target = root / "mcp-tools.json"
     staging = root / "mcp-tools.json.tmp"

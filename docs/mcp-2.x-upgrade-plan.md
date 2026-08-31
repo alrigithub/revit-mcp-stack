@@ -1,5 +1,7 @@
 # Upgrading revit-mcp from mcp 1.10.1 to 2.x — repo-specific plan
 
+> **STATUS (2026-08-31): DONE** — executed via `docs/superpowers/plans/2026-08-31-mcp2-and-bridge-improvements.md`. The rollout checklist below is kept for reference; CLAUDE.md carries the current pin policy.
+
 Companion to [mcp-2.x-migration.md](mcp-2.x-migration.md) (general SDK
 changes). Written 2026-08-30 against mcp 2.1.1.
 

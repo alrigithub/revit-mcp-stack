@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3XN-RevitMCP: local-only Revit MCP stack, three components in one repo:
 
 - `revit-c-bridge/` — C# Revit add-in (Revit 2025/2026 on net8.0-windows, 2027 on net10.0-windows; only 2025 is live-certified). Named-pipe server, bounded request queue + ledger, transaction coordinator, Activity dockable pane, ribbon.
-- `revit-mcp/` — pure-Python 3.12 stdio MCP server (`src/revit_mcp/`). ctypes named-pipe client, no pywin32/network. MCP SDK intentionally pinned to `mcp==1.10.1` (1.11+ drags in pywin32); don't upgrade casually.
+- `revit-mcp/` — pure-Python 3.12 stdio MCP server (`src/revit_mcp/`). ctypes named-pipe client, no pywin32/network. MCP SDK pinned exactly (`mcp==2.1.1`); pywin32 is an accepted Windows dependency since 2.x. Bump deliberately: change the pin, regenerate requirements.lock from pip's install report, run the suite.
 - `revit-pyrevit-extention/` — pyRevit extension hosting the IronPython 2.7 execution provider. UI-less: `startup.py` registers the provider disabled, retrying once per Idling tick until the bridge add-in loads (pyRevit loads first, alphabetically); the C# ribbon's Python toggle enables/disables/reloads it via the registered delegates.
 
 Security model: current-user-only pipe + per-process CSPRNG nonce, bounded frames, redacted errors, no listeners, hash-locked deps. Keep every change inside that posture. Execution policy lives in settings.json (ribbon Settings dialog, read per call): `allow_arbitrary_code` (default false — when off, dynamic source must content-match an enabled saved-tool script on disk; `CodeGate.cs`) and `bypass_dialogs` (default true — bridge-scoped failure/dialog auto-handling in `RevitRequestHandler`).
