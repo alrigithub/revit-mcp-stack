@@ -13,7 +13,3 @@ updates:
     directory: "/revit-mcp"
     schedule:
       interval: "weekly"
-    ignore:
-      # mcp is intentionally pinned to 1.10.1 — 1.11+ pulls in pywin32,
-      # which the pure-ctypes pipe client deliberately avoids.
-      - dependency-name: "mcp"
