@@ -1,4 +1,5 @@
 using Autodesk.Revit.DB;
+using RevitMcp.Core;
 
 namespace RevitMcp.Bridge;
 
@@ -42,6 +43,7 @@ public static class VerificationService
     {
         failure_definition_id = w.GetFailureDefinitionId().Guid.ToString("D"),
         severity = w.GetSeverity().ToString(),
+        severity_name = ReflectionProbes.FailureSeverityName(typeof(LabelUtils), w.GetSeverity()),
         description = w.GetDescriptionText(),
         involved_element_ids = w.GetFailingElements().Concat(w.GetAdditionalElements()).Distinct().Take(200).Select(id => id.Value).ToArray()
     }).ToArray();
