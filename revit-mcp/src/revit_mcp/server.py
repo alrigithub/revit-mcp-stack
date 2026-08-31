@@ -100,7 +100,7 @@ def get_request_status(pid: int, request_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 def get_active_context(pid: int, timeout_ms: int = 30_000) -> dict[str, Any]:
-    """Return the active Revit document/view context."""
+    """Return the active Revit document/view context. `edit_mode` reports Revit's active edit mode: "None" means no edit mode is open; any other value (family/sketch/group editing) means mutations will misbehave until the user exits it; null means this Revit build (pre-2025.3) cannot report it."""
     return _call(pid, "get_active_context", timeout_ms=timeout_ms)
 
 

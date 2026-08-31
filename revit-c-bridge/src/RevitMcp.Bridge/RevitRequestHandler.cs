@@ -193,7 +193,7 @@ public sealed class RevitRequestHandler(BridgeRuntime runtime) : IExternalEventH
             var uidoc = app.ActiveUIDocument;
             var document = uidoc?.Document;
             if (uidoc is null || document is null || !document.IsValidObject) return new { active = false };
-            return new { active = true, document = runtime.Documents.Describe(document, true), view_id = uidoc.ActiveView.Id.Value, view_name = uidoc.ActiveView.Name };
+            return new { active = true, document = runtime.Documents.Describe(document, true), view_id = uidoc.ActiveView.Id.Value, view_name = uidoc.ActiveView.Name, edit_mode = ReflectionProbes.ActiveEditMode(document) };
         }
         catch (Autodesk.Revit.Exceptions.InvalidObjectException) { return new { active = false }; }
     }
