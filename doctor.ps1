@@ -22,20 +22,20 @@ $addinUtility = Join-Path $env:ProgramFiles "Autodesk/Revit $RevitYear/RevitAddI
 if (Test-Path -LiteralPath $addinUtility) {
     try {
         Add-Type -LiteralPath $addinUtility -ErrorAction Stop
-        $managerType = [Type]::GetType('Autodesk.RevitAddIns.Manager.AddInsManagerSettings, RevitAddInUtility')
+        $managerType = [Type]::GetType('Autodesk.RevitAddInsManager.AddInsManagerSettings, RevitAddInUtility')
         if ($null -eq $managerType) {
             Write-Host '  add-in manager API not in this Revit build (pre-2025.3); skipped.'
         }
         else {
             $manager = $managerType::Get()
             if ($manager.DisableAllAddIns) { Write-Host '  ! DisableAllAddIns is ON - NO add-ins load next session.' }
-            $items = @($manager.GetAllAddInItemSettings() | Where-Object { $_.Name -match 'RevitMcp|3XN' })
+            $items = @($manager.GetAllAddInItemSettings() | Where-Object { $_.Name -match 'Revit\s*MCP|RevitMcp|3XN' -or $_.Vendor -match 'RVMC' })
             if ($items.Count -eq 0) {
                 Write-Host '  bridge not registered with the add-in manager yet (normal before its first load).'
             }
             foreach ($item in $items) {
                 $state = if ($item.Disabled) { 'DISABLED' } else { 'enabled ' }
-                Write-Host ("  {0} {1} (vendor {2}, last load {3})" -f $state, $item.Name, $item.Vendor, $item.LoadTime)
+                Write-Host ("  {0} {1} (vendor {2}, load time {3}ms)" -f $state, $item.Name, $item.Vendor, $item.LoadTime)
             }
         }
     }
