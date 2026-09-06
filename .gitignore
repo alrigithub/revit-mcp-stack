@@ -1,22 +1,23 @@
-# all dot folders (any depth), except the lint tooling that tracked files reference
-.*/
-!.lint/
-.lint/stubs/
-!.github/
-
+# Local/generated files
 **/bin/
 **/obj/
 **/artifacts/
 **/dist/
 **/__pycache__/
-**/validation/results/*
-!**/validation/results/.gitkeep
+**/.venv*/
+**/.pytest_cache/
+**/wheelhouse/
+*.pyc
 *.user
 *.suo
 *.pfx
 *.cer
-
-# kept locally, not published
-/REQUESTS-FOR-REOPE.md
-/RELEASE-NOTES-v0.9.md
-revit-pyrevit-extention/assets/
+*.rvt
+*.rfa
+*.rte
+*.rft
+*.log
+.vs/
+.idea/
+.vscode/
+.superpowers/

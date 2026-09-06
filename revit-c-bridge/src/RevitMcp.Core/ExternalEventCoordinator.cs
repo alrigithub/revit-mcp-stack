@@ -18,6 +18,7 @@ public sealed class ExternalEventCoordinator : IAsyncDisposable
     private readonly Task _loop;
     private CoordinatorState _state = CoordinatorState.Idle;
     private bool _retainedSignal;
+    private DateTimeOffset? _acceptedUtc;
 
     public ExternalEventCoordinator(IExternalEventRaiser raiser, Func<bool> hasWork)
     {
@@ -26,6 +27,7 @@ public sealed class ExternalEventCoordinator : IAsyncDisposable
         _loop = Task.Run(RunAsync);
     }
     public CoordinatorState State { get { lock (_gate) return _state; } }
+    public double? AcceptedWaitMs { get { lock (_gate) return _state == CoordinatorState.Accepted && _acceptedUtc.HasValue ? Math.Max(0, (DateTimeOffset.UtcNow - _acceptedUtc.Value).TotalMilliseconds) : null; } }
     public void NotifyWork()
     {
         lock (_gate)
@@ -80,7 +82,7 @@ public sealed class ExternalEventCoordinator : IAsyncDisposable
                     result = _raiser.Raise();
                     if (_state == CoordinatorState.Raising)
                     {
-                        if (result == RaiseResult.Accepted) _state = CoordinatorState.Accepted;
+                        if (result == RaiseResult.Accepted) { _state = CoordinatorState.Accepted; _acceptedUtc = DateTimeOffset.UtcNow; }
                         else { _state = CoordinatorState.Idle; _retainedSignal = _hasWork(); }
                     }
                 }

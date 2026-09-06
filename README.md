@@ -1,83 +1,43 @@
-# 3XN-RevitMCP
+# 3XN RevitMCP
 
-3XN-RevitMCP lets an AI assistant read and change an open Revit model. The Revit connection and code execution stay on your computer: one current-user named pipe, no network listeners, no cloud service.
+A small local bridge between Claude Code and Revit. Agents can inspect a model, run C# or Python, and get useful results, errors and PNGs. Company tools attach separately without rebuilding the bridge.
 
-```mermaid
-flowchart LR
-    U["You"] --> A["AI assistant"]
-    A --> M["Python MCP server"]
+## Install for colleagues
 
-    M -->|"queries or code"| P["Named pipe"]
-    P --> B["C# bridge in Revit"]
-    B --> E["Queue + ExternalEvent<br/>Revit UI thread"]
+1. Install **Revit 2025**, **Claude Code**, and **pyRevit 6.4** for Python support. Windows x64 is required.
+2. Extract `RevitMcp-v0.2.0-Revit2025.zip` to a local folder. Close Revit and Claude Code.
+3. Double-click **Install.cmd**. It installs for the current user and registers the `revit` MCP server in Claude Code. No administrator access, separate Python installation or dependency download is needed.
+4. Open Revit. If Revit asks about the unsigned 3XN add-in, load it. In **3XN RevitMCP**, turn **Bridge ON** and **Python ON**. These reset to OFF each Revit session.
+5. Open Claude Code. Ask it to list Revit instances and inspect the open model.
 
-    E -->|"built-in tools"| R["Revit API"]
-    E -->|"run_python"| PY["pyRevit / IronPython"]
-    E -->|"run_csharp"| CS["Roslyn / C#"]
-    PY --> R
-    CS --> R
+For agent-written modeling scripts, enable **Settings → Allow arbitrary code**. Fresh installs leave this OFF; built-in inspection/capture tools and enabled saved tools work without it. Run only trusted scripts: dynamic code runs with your Revit/Windows permissions.
 
-    M <-->|"list or run"| S["Saved tools<br/>.json + .py/.cs"]
-```
+The built release ZIP is in `dist/` in the prepared repository. A source-only clone needs a release build before installation; colleagues should use the ZIP.
 
-Results return through the same path to the AI assistant.
+## Everyday use
 
-## Components
+- **Activity** shows requests and changes. **Settings** controls execution policy and tool visibility.
+- **Building Overview** creates four elevations and four axonometrics as two labelled PNG sheets.
+- **Floor Views** captures selected floors with their associated elements.
+- **Inspect Selection** shows a close-up with context, an optional isolated view, and middle cuts.
+- **Section Views** creates horizontal or long/short vertical cuts.
 
-- [`revit-c-bridge/`](revit-c-bridge/) — C# Revit add-in: named-pipe server, bounded request queue, transaction coordinator, Activity dockable pane, ribbon.
-- [`revit-mcp/`](revit-mcp/) — pure-Python 3.12 stdio MCP server; ctypes pipe client, no pywin32, no network.
-- [`revit-pyrevit-extention/`](revit-pyrevit-extention/) — pyRevit extension hosting the IronPython 2.7 execution provider.
-- [`saved-tools/`](saved-tools/) — prebuilt saved tools, ready to deploy.
+The ribbon helpers also work with the bridge and Python OFF. They create reusable views named `3XN MCP - …` and PNGs under `%LOCALAPPDATA%\RevitMcp\captures`. The working view and selection stay in place. Save the model to retain helper views.
 
-Each folder's README has its build, test, and install detail.
+The agent decides what needs checking. An ordinary edit does not trigger an automatic model-wide audit. See [tools and contracts](docs/tools.md).
 
-## Install
+## Troubleshooting and removal
 
-1. Close Revit — the add-in DLL is locked while it runs.
-2. Run `./package-release.ps1` once to build and stage the install artifacts (skip if you unzipped a release build).
-3. Run `./install.ps1 -RevitYear 2025`. No elevation needed.
-4. Merge the generated `%LOCALAPPDATA%\RevitMcp\mcp\client-config.json` into your MCP client's configuration.
-5. Restart Revit.
+Run `./doctor.ps1` in PowerShell. If discovery is empty, turn Bridge ON. If Python is unavailable, check pyRevit and turn Python ON. If a request is queued, finish any Revit dialog/edit mode; resolve its status before retrying a mutation.
 
-Revit 2025 is the live-certified target. 2026 and 2027 build (`-RevitYear 2026|2027`) but are not certified yet.
+If Claude Code was installed later, run `./scripts/register-claude.ps1`. Other MCP clients can use `%LOCALAPPDATA%\RevitMcp\mcp\client-config.json`.
 
-## Start
+To remove: close Revit/Claude Code and run `./uninstall.ps1`. Settings, captures and custom tools remain. Remove Claude's registration with `claude mcp remove --scope user revit`.
 
-1. Open Revit and find the **3XN-RevitMCP** tab.
-2. Click the **Bridge** toggle — it turns green when the pipe is listening.
-3. Click the **Python** toggle if you want to run Python.
-4. Ask the AI assistant to inspect or modify the model.
+## Maintain and extend
 
-Both toggles reset to off every Revit session by design — a human click is required each time. The **Activity** pane shows the active document, open documents, tool activity, and what each request changed.
+[Release scope](docs/release.md) · [Tool contract](docs/tools.md) · [Third-party notices](THIRD-PARTY.md)
 
-## Settings
+Source maintainers: start with `CLAUDE.md`; add bespoke scripts using `saved-tools/README.md`. The bridge uses same-user named pipes with a per-process nonce; no bridge network listener or telemetry exporter. Your chosen AI client's data policies still apply.
 
-The ribbon **Settings** dialog controls the execution policy, stored in `%LOCALAPPDATA%\RevitMcp\settings.json` and read per call — no restart needed:
-
-- **Bypass Revit dialogs** (default on): popups raised during a bridge request are auto-handled and reported in the result instead of stalling the queue. Dialogs from human-driven work are never touched.
-- **Allow arbitrary code** (default off): while off, `run_python`/`run_csharp` only accept code that matches an enabled saved-tool script on disk.
-- **Saved tools folder** plus extra read-only tool paths, in search order.
-
-## Saved tools
-
-A saved tool is a proven script stored in:
-
-```text
-%LOCALAPPDATA%\RevitMcp\tools\
-```
-
-Each tool has a manifest (`name.json`) and a script (`name.py` or `name.cs`). Full contract: [`saved-tools/README.md`](saved-tools/README.md).
-
-- `list_saved_tools` reads the files without contacting Revit.
-- `run_saved_tool` validates the inputs, then uses the normal `run_python` or `run_csharp` path.
-- There is no `save_tool` MCP command. You or the AI assistant create the two files directly.
-- Subfolders are groups. The pane's **Saved** view can disable a whole path, a group, or a single tool.
-- Disable built-in MCP tools from the pane's **Tools** view.
-
-Prebuilt tools ship in [`saved-tools/`](saved-tools/); deploy them with `./sync.ps1 -Tools`. Changes are live at the next call.
-
-## Maintenance
-
-- `./doctor.ps1` checks the three installed components, live bridge instances, runtime settings, and drift between the repo and its deployed copies.
-- `./sync.ps1` copies server and extension changes to their deployed locations; `-Tools` also copies `saved-tools/`.
-- Bridge changes need `revit-c-bridge/scripts/package.ps1`, then close Revit, `scripts/install.ps1`, reopen.
+The core is designed to change rarely. Autodesk compatibility, defects, dependency security fixes and MCP client changes can still require updates.

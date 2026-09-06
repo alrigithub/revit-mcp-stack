@@ -4,6 +4,8 @@ import json
 import os
 import platform
 import hashlib
+import sys
+import traceback
 
 import clr
 from System import Action, AppDomain, Guid
@@ -23,6 +25,11 @@ def _load_bridge():
     if bridge is None:
         raise RuntimeError("RevitMcp.Bridge is not loaded. Install and restart Revit first.")
     clr.AddReference(bridge)
+    # IronPython imports only explicitly referenced assemblies, including dependencies.
+    for assembly in AppDomain.CurrentDomain.GetAssemblies():
+        if assembly.GetName().Name == "RevitMcp.Contracts":
+            clr.AddReference(assembly)
+            break
     from RevitMcp.Bridge import PythonCompileDelegate
     from RevitMcp.Bridge import PythonExecuteDelegate
     from RevitMcp.Bridge import PythonProviderDescriptor
@@ -85,9 +92,21 @@ def _execute(uiapp, doc, uidoc, request_json):
     code = _compiled.get(key)
     if code is None:
         raise RuntimeError("python source was not compiled before the transaction")
-    scope = {"uiapp": uiapp, "doc": doc, "uidoc": uidoc, "request": request.get("request") or {}, "_result": None}
-    exec code in scope
-    return json.dumps(_json_safe(scope.get("_result")), separators=(",", ":"))
+    from RevitMcp.Contracts import ScriptControl, ScriptFailureException
+    from System import OperationCanceledException
+    scope = {"uiapp": uiapp, "doc": doc, "uidoc": uidoc, "request": request.get("request") or {}, "_result": None,
+             "report_progress": ScriptControl.ReportProgress, "check_cancelled": ScriptControl.ThrowIfCancellationRequested}
+    try:
+        exec code in scope
+        return json.dumps(_json_safe(scope.get("_result")), separators=(",", ":"))
+    except OperationCanceledException:
+        raise
+    except Exception as error:
+        frames = [{"file": "agent.py", "line": line, "function": name}
+                  for filename, line, name, text in traceback.extract_tb(sys.exc_info()[2]) if filename == "agent.py"][-12:]
+        # Never include locals, full paths, or source text in diagnostics.
+        raise ScriptFailureException(json.dumps({"engine": "IronPython 2.7", "exception_type": type(error).__name__,
+                                                "message": str(error)[:500], "frames": frames}, separators=(",", ":")))
 
 
 def _self_test():

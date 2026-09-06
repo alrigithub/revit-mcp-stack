@@ -78,7 +78,7 @@ public sealed class PipeServer : IDisposable
             return Error(request.RequestId, "invalid_instance_nonce", "Discovery nonce does not match this Revit process.");
         if (!_runtime.AdmissionEnabled) return Error(request.RequestId, "bridge_off", "Use the Bridge ON ribbon control.");
 
-        var fast = FastPath(request);
+        var fast = await FastPath(request, cancellationToken).ConfigureAwait(false);
         if (fast is not null) return fast;
         var modeError = RequestValidation.ValidateTransactionMode(request.Tool, request.TransactionMode);
         if (modeError is not null) return Error(request.RequestId, modeError, "run_python and run_csharp require read, auto, manual, or group.");
@@ -103,9 +103,60 @@ public sealed class PipeServer : IDisposable
             }
         }
 
+        var usesPython = request.Tool == "run_python"
+            || (request.Tool == "execute_batch" && request.Arguments.TryGetProperty("steps", out var providerSteps) && providerSteps.EnumerateArray().Any(step => step.GetProperty("tool").GetString() == "run_python"))
+            || (request.Tool == "execute_and_verify" && request.Arguments.TryGetProperty("action", out var providerAction) && providerAction.GetProperty("tool").GetString() == "run_python");
+        var providerGeneration = usesPython ? _runtime.Providers.CurrentGeneration : null;
+        if (usesPython && _runtime.Providers.Capability != "available")
+            return Error(request.RequestId, "capability_unavailable", $"Python provider is {_runtime.Providers.Capability}; use Python ON after pyRevit registration.");
+
+        var admission = new RequestAdmission(request.RequestId, request.IdempotencyKey, request.Tool, request.DocumentSession,
+            request.DocumentGeneration, request.DeadlineUtc, providerGeneration, request.TransactionMode, request.Arguments, inputBytes);
+        var (record, created) = _runtime.Ledger.Admit(admission);
+        if (created)
+        {
+            // Deduplicate before preparing: only the admitted owner may populate its compiled slot.
+            try
+            {
+                var failure = PrepareCsharp(request);
+                if (failure is not null)
+                {
+                    record.Transition(RequestState.Failed, errorCode: failure.Error!.Code, redactedError: failure.Error.Message);
+                    _runtime.Roslyn.DiscardPrepared(request.RequestId);
+                    return RecordResponse(record);
+                }
+            }
+            catch (Exception ex)
+            {
+                record.Transition(RequestState.Failed, errorCode: "preparation_failed", redactedError: Redaction.Error(ex));
+                _runtime.Roslyn.DiscardPrepared(request.RequestId);
+                return RecordResponse(record);
+            }
+            if (cancellationToken.IsCancellationRequested)
+            {
+                record.Transition(RequestState.CancelledBridgeOff, errorCode: "bridge_off", redactedError: "The admitting bridge session was stopped.");
+                _runtime.Roslyn.DiscardPrepared(request.RequestId);
+                return RecordResponse(record);
+            }
+            if (!_runtime.TryQueue(record))
+            {
+                _runtime.Roslyn.DiscardPrepared(request.RequestId);
+                return RecordResponse(record);
+            }
+            _runtime.Log.Add(new(DateTimeOffset.UtcNow, request.RequestId, request.DocumentSession, "admitted", request.Tool, "queued", inputBytes, null, providerGeneration, null, request.TransactionMode, null, AdmittedLabel(request.Arguments)));
+            _runtime.NotifyWork();
+        }
+
+        while (!record.State.IsTerminal() && DateTimeOffset.UtcNow < request.DeadlineUtc && !cancellationToken.IsCancellationRequested)
+            await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+        return RecordResponse(record);
+    }
+
+    private ProtocolResponse? PrepareCsharp(ProtocolRequest request)
+    {
         if (request.Tool == "run_csharp")
         {
-            var prepared = _runtime.Roslyn.Prepare(request.RequestId, source.GetString() ?? string.Empty);
+            var prepared = _runtime.Roslyn.Prepare(request.RequestId, request.Arguments.GetProperty("source").GetString() ?? string.Empty);
             if (!prepared.Success) return new(ProtocolConstants.Version, request.RequestId, "failed", null, new("csharp_compile_error", prepared.DiagnosticsJson, "Fix diagnostics mapped to agent.cs."), [], []);
         }
 
@@ -130,30 +181,7 @@ public sealed class PipeServer : IDisposable
             if (!prepared.Success) return new(ProtocolConstants.Version, request.RequestId, "failed", null, new("csharp_compile_error", prepared.DiagnosticsJson, "Fix diagnostics mapped to agent.cs."), [], []);
         }
 
-        var usesPython = request.Tool == "run_python"
-            || (request.Tool == "execute_batch" && request.Arguments.TryGetProperty("steps", out var providerSteps) && providerSteps.EnumerateArray().Any(step => step.GetProperty("tool").GetString() == "run_python"))
-            || (request.Tool == "execute_and_verify" && request.Arguments.TryGetProperty("action", out var providerAction) && providerAction.GetProperty("tool").GetString() == "run_python");
-        var providerGeneration = usesPython ? _runtime.Providers.CurrentGeneration : null;
-        if (usesPython && _runtime.Providers.Capability != "available")
-            return Error(request.RequestId, "capability_unavailable", $"Python provider is {_runtime.Providers.Capability}; use Python ON after pyRevit registration.");
-
-        var admission = new RequestAdmission(request.RequestId, request.IdempotencyKey, request.Tool, request.DocumentSession,
-            request.DocumentGeneration, request.DeadlineUtc, providerGeneration, request.TransactionMode, request.Arguments, inputBytes);
-        var (record, created) = _runtime.Ledger.Admit(admission);
-        if (created)
-        {
-            if (!_runtime.Queue.TryEnqueue(record))
-            {
-                record.Transition(RequestState.Failed, errorCode: "queue_full", redactedError: "Bounded Revit queue is full; no mutation was admitted.");
-                return RecordResponse(record);
-            }
-            _runtime.Log.Add(new(DateTimeOffset.UtcNow, request.RequestId, request.DocumentSession, "admitted", request.Tool, "queued", inputBytes, null, providerGeneration, null, request.TransactionMode, null, AdmittedLabel(request.Arguments)));
-            _runtime.NotifyWork();
-        }
-
-        while (!record.State.IsTerminal() && DateTimeOffset.UtcNow < request.DeadlineUtc && !cancellationToken.IsCancellationRequested)
-            await Task.Delay(10, cancellationToken).ConfigureAwait(false);
-        return RecordResponse(record);
+        return null;
     }
 
     private static string? AdmittedLabel(JsonElement args) =>
@@ -188,13 +216,24 @@ public sealed class PipeServer : IDisposable
             yield return (actionTool.GetString()!, actionSource.GetString()!);
     }
 
-    private ProtocolResponse? FastPath(ProtocolRequest request)
+    private async Task<ProtocolResponse?> FastPath(ProtocolRequest request, CancellationToken cancellationToken)
     {
         if (request.Tool == "get_request_status")
         {
             if (!request.Arguments.TryGetProperty("request_id", out var statusId) || !_runtime.Ledger.TryGet(statusId.GetString() ?? "", out var statusRecord))
                 return Error(request.RequestId, "request_not_found", "No ledger record exists for that request ID.");
-            return Success(request.RequestId, RecordObject(statusRecord!));
+            var record = statusRecord!;
+            if (request.Arguments.TryGetProperty("request_cancel", out var cancel) && cancel.GetBoolean())
+            {
+                record.RequestCancellation();
+                _runtime.Queue.CancelQueued(r => ReferenceEquals(r, record), RequestState.CancelledBeforeStart);
+            }
+            var after = request.Arguments.TryGetProperty("after_revision", out var revision) ? revision.GetInt64() : -1;
+            var waitMs = Math.Clamp(request.Arguments.TryGetProperty("wait_ms", out var wait) ? wait.GetInt32() : 0, 0, 30000);
+            var until = DateTimeOffset.UtcNow.AddMilliseconds(waitMs);
+            while (!record.State.IsTerminal() && record.Revision <= after && DateTimeOffset.UtcNow < until)
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            return Success(request.RequestId, RecordObject(record));
         }
         object? value = request.Tool switch
         {
@@ -206,7 +245,7 @@ public sealed class PipeServer : IDisposable
         return value is null ? null : Success(request.RequestId, value);
     }
 
-    private static object RecordObject(RequestRecord record) => new
+    private object RecordObject(RequestRecord record) => new
     {
         request_id = record.Admission.RequestId,
         tool = record.Admission.Tool,
@@ -215,11 +254,14 @@ public sealed class PipeServer : IDisposable
         updated_utc = record.UpdatedUtc,
         result = record.Result,
         error_code = record.ErrorCode,
-        error = record.RedactedError
+        error = record.RedactedError,
+        receipt = record.Receipt(),
+        queue_position = _runtime.Queue.Position(record),
+        readiness = _runtime.Readiness()
     };
 
     private static ProtocolResponse RecordResponse(RequestRecord record) => new(ProtocolConstants.Version, record.Admission.RequestId,
-        record.State.ToString().ToLowerInvariant(), record.Result, record.ErrorCode is null ? null : new(record.ErrorCode, record.RedactedError ?? record.ErrorCode), [], []);
+        record.State.ToString().ToLowerInvariant(), record.Result, record.ErrorCode is null ? null : new(record.ErrorCode, record.RedactedError ?? record.ErrorCode), [], [], record.Receipt());
     private static ProtocolResponse Success(string id, object value) => new(ProtocolConstants.Version, id, "succeeded", JsonSerializer.SerializeToElement(value, JsonOptions), null, [], []);
     private static ProtocolResponse Error(string id, string code, string message, bool retryable = false) => new(ProtocolConstants.Version, id, "failed", null, new(code, message, null, retryable), [], []);
     private static async Task<bool> TryWriteAsync(Stream stream, ProtocolResponse response)

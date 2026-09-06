@@ -89,7 +89,8 @@ public sealed record ProtocolResponse(
     System.Text.Json.JsonElement? Result,
     ProtocolError? Error,
     string[] OmittedFields,
-    string[] DeferredFields);
+    string[] DeferredFields,
+    System.Text.Json.JsonElement? Receipt = null);
 
 public sealed record CompileRequest(string Source, string RevitYear, string[] ReferencePaths, string CacheKeySeed);
 public sealed record CompileResult(bool Success, byte[]? AssemblyBytes, byte[]? PdbBytes, string DiagnosticsJson, string CacheKey);

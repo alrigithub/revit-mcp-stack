@@ -1,8 +1,0 @@
-.venv/
-dist/
-artifacts/
-wheelhouse/
-__pycache__/
-.pytest_cache/
-validation/results/*
-!validation/results/.gitkeep

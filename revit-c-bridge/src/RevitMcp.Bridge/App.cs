@@ -42,6 +42,7 @@ public sealed class App : IExternalApplication
 
     private void OnIdling(object? sender, IdlingEventArgs args)
     {
+        BridgeRuntime.Current?.ObserveIdling();
         if (_activityPane is null || DateTimeOffset.UtcNow < _nextActivityRefreshUtc) return;
         _nextActivityRefreshUtc = DateTimeOffset.UtcNow.AddMilliseconds(250);
         var uiapp = sender as UIApplication;
@@ -93,6 +94,21 @@ public sealed class App : IExternalApplication
         settings.ToolTip = "Execution policy and saved-tool locations.";
         runtime.AttachButtons(bridge, python);
         runtime.RefreshRibbon();
+        var inspection = application.CreateRibbonPanel(tab, "Inspection Views");
+        foreach (var item in new[]
+        {
+            ("Overview", "Building\nOverview", typeof(BuildingCaptureCommand)),
+            ("Floors", "Floor\nViews", typeof(FloorCaptureCommand)),
+            ("Selection", "Inspect\nSelection", typeof(ElementCaptureCommand)),
+            ("Sections", "Section\nViews", typeof(SectionCaptureCommand))
+        })
+        {
+            var data = new PushButtonData("RevitMcp.Capture." + item.Item1, item.Item2, assembly, item.Item3.FullName!)
+                { AvailabilityClassName = typeof(CaptureAvailable).FullName };
+            var button = (PushButton)inspection.AddItem(data);
+            button.LargeImage = LucideIcon.Create(["M3 6 12 2 21 6 21 18 12 22 3 18Z", "M3 6 12 10 21 6", "M12 10 12 22"], LucideIcon.Blue, 32, 1.25);
+            button.ToolTip = "Create reusable inspection views and labelled PNG sheets. Works with Bridge and Python off.";
+        }
     }
 }
 

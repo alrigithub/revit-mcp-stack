@@ -1,15 +1,7 @@
-# AV/EDR runbook
+# Endpoint troubleshooting
 
-The bridge opens one byte-mode named pipe under the current Windows user and writes atomic JSON discovery records under `%LOCALAPPDATA%\RevitMcp\instances`. It opens no network port and starts no child process.
+The bridge uses a current-user named pipe (`revit-mcp-…`) and discovery records under `%LOCALAPPDATA%\RevitMcp\instances`. The bridge transport opens no network port. Scripts run with the host user's privileges and can use other APIs.
 
-Before rollout, submit the signed package hashes to the firm's security team. Capture product name/version/policy, whether pipe creation/connect is allowed, any alert ID, process tree, and per-hop timing. Never disable endpoint protection as a workaround.
+For `pipe_or_edr` errors, confirm Bridge ON, matching Windows user, and a live PID/start identity. Run the root `doctor.ps1`, then inspect bounded `get_logs_tail` output. Stale discovery can be removed with `scripts/cleanup-discovery.ps1`.
 
-If a client receives a `pipe_or_edr` error:
-
-1. Confirm the Revit ribbon reports Bridge ON and the discovery PID/start identity matches the running process.
-2. Confirm Revit and the MCP process use the same Windows user/integrity boundary.
-3. Run `scripts/status.ps1` and inspect only bounded operational logs; source/model/results are not logged.
-4. Ask security to review named-pipe events for the exact signed hashes and random pipe prefix `revit-mcp-`.
-5. Record the outcome in the live validation JSONL. Do not enable HTTP or Routes fallback.
-
-Crash-kill recovery is discovery-driven: stale records are rejected by PID/start identity and may be removed with `cleanup-discovery.ps1`. A clean shutdown removes discovery. Bridge/Python default OFF after restart.
+The package includes SHA-256 hashes and component SBOMs. This release is unsigned. Use those exact hashes and any alert ID when asking IT to review a block; do not disable endpoint protection or introduce an HTTP fallback.

@@ -1,13 +1,17 @@
 param([string]$PackagePath, [string]$InstallRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RevitMcp/mcp'))
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $root '../scripts/common.ps1')
 if (-not $PackagePath) { $PackagePath = Join-Path $root 'artifacts' }
 $source = [IO.Path]::GetFullPath($PackagePath)
-foreach ($required in @('runtime/Scripts/python.exe','revit_mcp/server.py','sha256-manifest.json')) { if (-not (Test-Path -LiteralPath (Join-Path $source $required))) { throw "Frozen package missing $required" } }
+Test-PackageHashes $source
+foreach ($required in @('runtime/python.exe','revit_mcp/server.py')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $source $required))) { throw "Portable package missing $required" }
+}
+& (Join-Path $source 'runtime/python.exe') -B -c "import mcp,pydantic,win32api,revit_mcp.server"
+if ($LASTEXITCODE -ne 0) { throw 'Packaged runtime does not start on this computer.' }
 $target = [IO.Path]::GetFullPath($InstallRoot)
-New-Item -ItemType Directory -Force -Path $target | Out-Null
-Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $target -Recurse -Force
-$config = [ordered]@{ mcpServers = [ordered]@{ revit = [ordered]@{ command = (Join-Path $target 'runtime/Scripts/python.exe'); args = @('-m','revit_mcp.server'); env = [ordered]@{ PYTHONPATH = $target } } } }
+Install-Tree $source $target
+$config = [ordered]@{ mcpServers = [ordered]@{ revit = [ordered]@{ command = (Join-Path $target 'runtime/python.exe'); args = @('-B','-m','revit_mcp.server') } } }
 $config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $target 'client-config.json') -Encoding utf8
-Write-Host "Copied frozen environment without dependency resolution to $target"
-Write-Host "Merge $(Join-Path $target 'client-config.json') into the owner's MCP client configuration."
+Write-Host "Installed self-contained MCP runtime at $target. No Python installation or dependency download is needed."

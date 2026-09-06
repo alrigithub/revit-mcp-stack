@@ -5,12 +5,17 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $root '../scripts/common.ps1')
 $buildArguments = @{ RevitYear = $RevitYear }
 if ($RevitApiDir) { $buildArguments.RevitApiDir = $RevitApiDir }
 & (Join-Path $PSScriptRoot 'build.ps1') @buildArguments
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+& (Join-Path $PSScriptRoot 'test.ps1')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 $stage = Join-Path $root "artifacts/$RevitYear"
+Reset-Directory $stage (Join-Path $root 'artifacts')
 $addinDir = Join-Path $stage 'RevitMcp'
 $providerDir = Join-Path $addinDir 'providers/roslyn/1'
 New-Item -ItemType Directory -Force -Path $providerDir | Out-Null
@@ -24,8 +29,7 @@ Get-ChildItem -LiteralPath $providerOut -Filter '*.dll' | Where-Object { $_.Name
     Copy-Item -LiteralPath $_.FullName -Destination $providerDir -Force
 }
 
-$installAssembly = Join-Path ([Environment]::GetFolderPath('ApplicationData')) "Autodesk/Revit/Addins/$RevitYear/RevitMcp/RevitMcp.Bridge.dll"
-$manifest = (Get-Content -Raw -LiteralPath (Join-Path $root "manifests/$RevitYear.addin")).Replace('{{ASSEMBLY}}', $installAssembly)
+$manifest = Get-Content -Raw -LiteralPath (Join-Path $root "manifests/$RevitYear.addin")
 $manifest | Set-Content -LiteralPath (Join-Path $stage 'RevitMcp.addin') -Encoding utf8
 
 if ($CertificateThumbprint) {
@@ -40,7 +44,4 @@ $files = Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object { $_.Na
 
 $versionFile = Join-Path $root 'version.txt'
 $packagedVersion = (Get-Content -Raw -LiteralPath $versionFile).Trim()
-$parts = $packagedVersion.Split('.')
-$parts[-1] = ([int]$parts[-1] + 1).ToString('00')
-($parts -join '.') | Set-Content -LiteralPath $versionFile -NoNewline
-Write-Host "Packaged reviewed Revit $RevitYear files at $stage (v$packagedVersion; next build v$($parts -join '.'))"
+Write-Host "Packaged Revit $RevitYear at $stage (v$packagedVersion). Version is never changed by packaging."

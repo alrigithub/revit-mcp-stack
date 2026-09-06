@@ -80,7 +80,7 @@ public sealed class PythonProviderRegistry : IDisposable
             _descriptor = descriptor; _compiler = compiler; _executor = executor; _reload = reload; _registeredUtc = DateTimeOffset.UtcNow;
         }
         if (prior is not null && prior != descriptor.ProviderGeneration)
-            _queue.CancelQueued(r => r.Admission.Tool == "run_python" && r.Admission.ProviderGeneration == prior, RequestState.ProviderReloadedBeforeStart);
+            _queue.CancelQueued(r => r.Admission.ProviderGeneration == prior, RequestState.ProviderReloadedBeforeStart);
         _log.Add(new(DateTimeOffset.UtcNow, null, null, "python_registered", "run_python", Capability, null, null,
             descriptor.EngineName + " " + descriptor.EngineVersion + (string.IsNullOrWhiteSpace(descriptor.PyRevitVersion) ? "" : " · pyRevit " + descriptor.PyRevitVersion), null));
     }
@@ -91,7 +91,7 @@ public sealed class PythonProviderRegistry : IDisposable
             if (_descriptor is null) throw new InvalidOperationException("Python provider has not registered.");
             _descriptor.Enabled = enabled;
         }
-        if (!enabled) _queue.CancelQueued(r => r.Admission.Tool == "run_python", RequestState.ProviderDisabledBeforeStart);
+        if (!enabled) _queue.CancelQueued(r => r.Admission.ProviderGeneration is not null, RequestState.ProviderDisabledBeforeStart);
     }
     public string Execute(string pinnedGeneration, UIApplication uiapp, Document doc, UIDocument? uidoc, string requestJson)
     {
@@ -127,7 +127,7 @@ public sealed class PythonProviderRegistry : IDisposable
             _descriptor.Enabled = false;
             reload = _reload;
         }
-        _queue.CancelQueued(r => r.Admission.Tool == "run_python", RequestState.ProviderReloadedBeforeStart);
+        _queue.CancelQueued(r => r.Admission.ProviderGeneration is not null, RequestState.ProviderReloadedBeforeStart);
         reload();
         lock (_gate)
         {

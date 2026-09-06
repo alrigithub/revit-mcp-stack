@@ -1,7 +1,9 @@
-param([string]$InstallRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RevitMcp/mcp'))
+param([string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'RevitMcp/mcp'))
 $ErrorActionPreference = 'Stop'
-$parent = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RevitMcp/mcp'))
-$target = [IO.Path]::GetFullPath($InstallRoot)
-if (-not $target.StartsWith($parent, [StringComparison]::OrdinalIgnoreCase)) { throw 'Refusing unexpected uninstall target.' }
-Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host 'Removed the frozen MCP environment. It can be recovered from the reviewed package.'
+. (Join-Path $PSScriptRoot '../../scripts/common.ps1')
+$expected = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'RevitMcp/mcp'))
+$target = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\','/')
+if ($target -ne $expected) { throw 'Uninstall is restricted to the standard per-user MCP installation.' }
+$target = Assert-ChildPath $target (Split-Path -Parent $expected)
+if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+Write-Host 'Removed the MCP runtime. Settings, saved tools and captures are retained.'

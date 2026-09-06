@@ -1,135 +1,34 @@
-# One-shot health check: the three installed components, live bridge instances, runtime settings,
-# and drift between the repo and its deployed copies. Read-only; fix drift with ./sync.ps1.
 param([ValidateSet(2025, 2026, 2027)][int]$RevitYear = 2025)
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
-$appData = [Environment]::GetFolderPath('ApplicationData')
-$localAppData = [Environment]::GetFolderPath('LocalApplicationData')
-
-function Show([string]$label, [bool]$ok, [string]$detail = '') {
-    $state = if ($ok) { 'ok      ' } else { 'MISSING ' }
-    Write-Host ("  {0}{1}{2}" -f $state, $label, $(if ($detail) { " ($detail)" } else { '' }))
+$checks = @{
+    'Revit' = "$env:ProgramFiles/Autodesk/Revit $RevitYear/Revit.exe"
+    'Add-in manifest' = "$env:APPDATA/Autodesk/Revit/Addins/$RevitYear/RevitMcp.addin"
+    'Bridge' = "$env:APPDATA/Autodesk/Revit/Addins/$RevitYear/RevitMcp/RevitMcp.Bridge.dll"
+    'C# provider' = "$env:APPDATA/Autodesk/Revit/Addins/$RevitYear/RevitMcp/providers/roslyn/1/RevitMcp.RoslynProvider.dll"
+    'Python extension' = "$env:APPDATA/pyRevit/Extensions/RevitMCP.extension/lib/revit_mcp_provider.py"
+    'Bundled runtime' = "$env:LOCALAPPDATA/RevitMcp/mcp/runtime/python.exe"
 }
-
-Write-Host "Bridge install (Revit $RevitYear)"
-$addins = Join-Path $appData "Autodesk/Revit/Addins/$RevitYear"
-Show 'RevitMcp.addin manifest' (Test-Path -LiteralPath (Join-Path $addins 'RevitMcp.addin'))
-Show 'bridge DLL' (Test-Path -LiteralPath (Join-Path $addins 'RevitMcp/RevitMcp.Bridge.dll'))
-Show 'Roslyn provider DLL' (Test-Path -LiteralPath (Join-Path $addins 'RevitMcp/providers/roslyn/1/RevitMcp.RoslynProvider.dll'))
-
-Write-Host 'Add-in manager (Revit 2025.3+)'
-$addinUtility = Join-Path $env:ProgramFiles "Autodesk/Revit $RevitYear/RevitAddInUtility.dll"
-if (Test-Path -LiteralPath $addinUtility) {
-    try {
-        Add-Type -LiteralPath $addinUtility -ErrorAction Stop
-        $managerType = [Type]::GetType('Autodesk.RevitAddInsManager.AddInsManagerSettings, RevitAddInUtility')
-        if ($null -eq $managerType) {
-            Write-Host '  add-in manager API not in this Revit build (pre-2025.3); skipped.'
-        }
-        else {
-            $manager = $managerType::Get()
-            if ($manager.DisableAllAddIns) { Write-Host '  ! DisableAllAddIns is ON - NO add-ins load next session.' }
-            $items = @($manager.GetAllAddInItemSettings() | Where-Object { $_.Name -match 'Revit\s*MCP|RevitMcp|3XN' -or $_.Vendor -match 'RVMC' })
-            if ($items.Count -eq 0) {
-                Write-Host '  bridge not registered with the add-in manager yet (normal before its first load).'
-            }
-            foreach ($item in $items) {
-                $state = if ($item.Disabled) { 'DISABLED' } else { 'enabled ' }
-                Write-Host ("  {0} {1} (vendor {2}, load time {3}ms)" -f $state, $item.Name, $item.Vendor, $item.LoadTime)
-            }
-        }
-    }
-    catch { Write-Host "  add-in manager query failed: $($_.Exception.Message)" }
+foreach ($name in $checks.Keys | Sort-Object) {
+    $present = Test-Path -LiteralPath $checks[$name]
+    Write-Host ($(if ($present) { 'OK      ' } else { 'MISSING ' }) + $name)
 }
-else {
-    Write-Host "  RevitAddInUtility.dll not found for Revit $RevitYear; skipped."
-}
-
-Write-Host 'MCP server install'
-$mcpRoot = Join-Path $localAppData 'RevitMcp/mcp'
-Show 'bundled Python runtime' (Test-Path -LiteralPath (Join-Path $mcpRoot 'runtime/Scripts/python.exe'))
-Show 'server source' (Test-Path -LiteralPath (Join-Path $mcpRoot 'revit_mcp/server.py'))
-Show 'client config' (Test-Path -LiteralPath (Join-Path $mcpRoot 'client-config.json'))
-if (Test-Path -LiteralPath (Join-Path $mcpRoot '0.9.0')) {
-    Write-Host '  ! legacy versioned install at mcp\0.9.0 - re-register the MCP client against mcp\ and delete it'
-}
-
-Write-Host 'pyRevit extension install'
-$extension = Join-Path $appData 'pyRevit/Extensions/RevitMCP.extension'
-Show 'startup.py' (Test-Path -LiteralPath (Join-Path $extension 'startup.py'))
-Show 'provider module' (Test-Path -LiteralPath (Join-Path $extension 'lib/revit_mcp_provider.py'))
-
-Write-Host 'Live bridge instances'
-$records = @(Get-ChildItem -LiteralPath (Join-Path $localAppData 'RevitMcp/instances') -Filter '*.json' -ErrorAction SilentlyContinue)
-if ($records.Count -eq 0) {
-    Write-Host '  none (start Revit and click Bridge ON)'
-}
-foreach ($record in $records) {
-    try {
-        $data = Get-Content -LiteralPath $record.FullName -Raw | ConvertFrom-Json
-        $alive = $null -ne (Get-Process -Id $data.pid -ErrorAction SilentlyContinue)
-        $state = if ($alive) { 'live ' } else { 'STALE' }
-        Write-Host ("  {0} Revit {1} pid {2} bridge {3}" -f $state, $data.revit_year, $data.pid, $data.bridge_state)
-    }
-    catch { Write-Host "  UNREADABLE $($record.Name)" }
-}
-
-Write-Host 'Runtime settings'
-$settingsPath = Join-Path $localAppData 'RevitMcp/settings.json'
-if (Test-Path -LiteralPath $settingsPath) {
-    try {
-        $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-        Write-Host "  saved_tools_root: $($settings.saved_tools_root)"
-        $extraPaths = @($settings.saved_tools_paths)
-        if ($extraPaths.Count) { Write-Host "  saved_tools_paths: $($extraPaths -join '; ')" }
-        $disabled = @($settings.disabled_mcp_tools)
-        Write-Host "  disabled_mcp_tools: $(if ($disabled.Count) { $disabled -join ', ' } else { 'none' })"
-    }
-    catch { Write-Host "  UNREADABLE $settingsPath" }
-}
-else {
-    Write-Host '  no settings.json (defaults apply)'
-}
-
-Write-Host 'Repo-to-deployed drift'
-$toolsRoot = Join-Path $localAppData 'RevitMcp/tools'
-if (Test-Path -LiteralPath $settingsPath) {
-    try {
-        $configured = (Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json).saved_tools_root
-        if ($configured) { $toolsRoot = $configured }
-    }
-    catch { }
+$python = $checks['Bundled runtime']
+if (Test-Path -LiteralPath $python) {
+    & $python -B -c "from revit_mcp import __version__; from revit_mcp.discovery import list_instances; print('MCP version:',__version__); print('Live bridge instances:',len(list_instances()))"
+    if ($LASTEXITCODE -ne 0) { throw 'The installed runtime failed its import check.' }
 }
 $mirrors = @(
-    @{ Name = 'revit-mcp server'
-       Source = [IO.Path]::GetFullPath((Join-Path $root 'revit-mcp/src/revit_mcp'))
-       Target = Join-Path $mcpRoot 'revit_mcp' },
-    @{ Name = 'pyRevit extension'
-       Source = [IO.Path]::GetFullPath((Join-Path $root 'revit-pyrevit-extention/RevitMCP.extension'))
-       Target = $extension },
-    @{ Name = 'saved tools (sync.ps1 -Tools)'
-       Source = [IO.Path]::GetFullPath((Join-Path $root 'saved-tools'))
-       Target = $toolsRoot }
+    @{ source='revit-mcp/src/revit_mcp'; target="$env:LOCALAPPDATA/RevitMcp/mcp/revit_mcp" },
+    @{ source='revit-pyrevit-extention/RevitMCP.extension'; target="$env:APPDATA/pyRevit/Extensions/RevitMCP.extension" }
 )
 foreach ($mirror in $mirrors) {
-    if (-not (Test-Path -LiteralPath $mirror.Target)) {
-        Write-Host "  $($mirror.Name): not installed; skipped."
-        continue
-    }
-    $stale = @(Get-ChildItem -LiteralPath $mirror.Source -Recurse -File | Where-Object { $_.FullName -notmatch '__pycache__' } | ForEach-Object {
-        $relative = $_.FullName.Substring($mirror.Source.Length + 1)
-        $destination = Join-Path $mirror.Target $relative
-        $same = (Test-Path -LiteralPath $destination) -and
-            ((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash)
-        if (-not $same) { $relative }
+    $source = Join-Path $PSScriptRoot $mirror.source
+    if (-not (Test-Path -LiteralPath $source)) { continue }
+    $different = @(Get-ChildItem -LiteralPath $source -Recurse -File | Where-Object { $_.FullName -notmatch '__pycache__' } | Where-Object {
+        $destination = Join-Path $mirror.target $_.FullName.Substring($source.Length + 1)
+        -not (Test-Path -LiteralPath $destination) -or (Get-FileHash -LiteralPath $_.FullName).Hash -ne (Get-FileHash -LiteralPath $destination).Hash
     })
-    if ($stale.Count -eq 0) {
-        Write-Host "  $($mirror.Name): in sync."
-    }
-    else {
-        Write-Host "  $($mirror.Name): $($stale.Count) file(s) differ (run ./sync.ps1):"
-        $stale | Select-Object -First 10 | ForEach-Object { Write-Host "    $_" }
-        if ($stale.Count -gt 10) { Write-Host "    ... and $($stale.Count - 10) more" }
-    }
+    Write-Host "$($mirror.source): $($different.Count) source files differ from installed copies."
 }
-Write-Host '  bridge: compare pane footer version against revit-c-bridge/version.txt; reinstall via package + install with Revit closed.'
+Write-Host 'If no bridge is listed: open Revit and turn Bridge ON. For Python, also turn Python ON.'
+Write-Host 'Claude connection: claude mcp get revit. Installed config: %LOCALAPPDATA%\RevitMcp\mcp\client-config.json'

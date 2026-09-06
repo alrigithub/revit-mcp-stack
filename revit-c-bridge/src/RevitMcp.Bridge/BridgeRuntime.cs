@@ -23,6 +23,15 @@ public sealed class BridgeRuntime : IDisposable
     private PushButton? _bridgeButton;
     private PushButton? _pythonButton;
     private bool _disposed;
+    private long _lastIdleTicks;
+    internal void ObserveIdling() => Interlocked.Exchange(ref _lastIdleTicks, DateTimeOffset.UtcNow.UtcTicks);
+    internal object Readiness() => new
+    {
+        coordinator = _coordinator?.State.ToString().ToLowerInvariant(), queued = Queue.Count,
+        accepted_event_wait_ms = _coordinator?.AcceptedWaitMs,
+        last_idling_utc = Interlocked.Read(ref _lastIdleTicks) is var ticks && ticks > 0 ? new DateTimeOffset(ticks, TimeSpan.Zero) : (DateTimeOffset?)null,
+        note = "Observed UI activity, not a guarantee of readiness. Modal or inactive Revit may delay queued work."
+    };
 
     private BridgeRuntime(string revitYear)
     {
@@ -136,6 +145,20 @@ public sealed class BridgeRuntime : IDisposable
     }
 
     internal void NotifyWork() => _coordinator?.NotifyWork();
+    internal bool TryQueue(RequestRecord record)
+    {
+        lock (_gate)
+        {
+            if (!AdmissionEnabled)
+            {
+                record.Transition(RequestState.CancelledBridgeOff, errorCode: "bridge_off", redactedError: "Bridge was turned off before queue admission.");
+                return false;
+            }
+            if (Queue.TryEnqueue(record)) return true;
+            record.Transition(RequestState.Failed, errorCode: "queue_full", redactedError: "Bounded Revit queue is full; no mutation was admitted.");
+            return false;
+        }
+    }
     internal void HandlerStarted() => _coordinator?.HandlerStarted();
     internal void HandlerExited() => _coordinator?.HandlerExited();
 
@@ -148,6 +171,8 @@ public sealed class BridgeRuntime : IDisposable
         python = Providers.Capability,
         roslyn = Roslyn.Capability,
         transaction_modes = new[] { "read", "auto", "manual", "group" },
+        features = new[] { "request_receipts", "status_long_poll", "cooperative_cancellation", "capture_model", "png_export", "optional_assertions", "field_selection", "element_cursor" },
+        readiness = Readiness(),
         security = new { trust = "same_windows_user_v0", current_user_pipe = true, authentication = false },
         deferred_projections = VerificationService.DeferredFields
     };

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 from datetime import datetime, timezone
@@ -6,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.types import CallToolResult, ImageContent, TextContent
 
 from . import saved_tools
 from .client import BridgeClient
@@ -16,7 +18,9 @@ AGENT_INSTRUCTIONS = """Local-only Revit bridge. Select a PID and explicit docum
 Batch related model work into ONE run_python or run_csharp script instead of many small calls: each call waits for Revit's single UI-thread ExternalEvent and may be delayed while Revit is busy or modal. Use execute_batch when separate steps specifically need atomic grouping and structured per-step results.
 Python source is IronPython 2.7: no f-strings or Python 3-only syntax; use % or .format(), return JSON-safe data through _result, and use the available uiapp, doc, uidoc, request, Revit API, and .NET interop objects.
 If Revit is busy/modal and a request remains queued or reports revit_busy, wait until Revit is ready. Retry reads safely; for mutations, first resolve get_request_status and reuse the same request_id/idempotency_key rather than blindly creating a second mutation.
+Transport errors return state unknown: they do not prove rollback. Manual scripts and non-atomic batches can leave committed changes after an error; inspect the model and ledger before recovery. Ledger history is bounded and does not survive a Revit restart, so request_not_found is not proof that a mutation never ran.
 transaction_mode is required for dynamic code: read opens no transaction; auto wraps one bridge-owned transaction; manual makes the script own and close every transaction; group wraps one bridge-owned transaction inside an assimilated group for one undo item.
+Verification is proportionate: use a compact read or selected PNG sheet when it answers a real uncertainty. Optional assertions and capture_model are never required after every mutation. Progress/cancellation hooks are cooperative and cannot interrupt a native API call.
 Saved tools are proven scripts promoted to reusable named tools on disk: call list_saved_tools before creating files so you use its configured root; subfolders are groups. Run enabled tools with run_saved_tool. New files and enable/disable markers are live immediately without restart."""
 
 client = BridgeClient()
@@ -93,9 +97,13 @@ def get_capabilities(pid: int) -> dict[str, Any]:
 
 
 @mcp.tool()
-def get_request_status(pid: int, request_id: str) -> dict[str, Any]:
-    """Resolve the real final disposition of a previously admitted request."""
-    return _call(pid, "get_request_status", {"request_id": request_id})
+def get_request_status(pid: int, request_id: str, after_revision: int | None = None, wait_ms: int = 0,
+                       request_cancel: bool = False) -> dict[str, Any]:
+    """Resolve disposition and timing without the UI queue. Optional long poll (max 30s) waits for a revision change. request_cancel cancels queued work or requests cooperative cancellation; running scripts must call check_cancelled/ReportProgress. Never assume a cancellation request means rollback."""
+    args: dict[str, Any] = {"request_id": request_id, "wait_ms": max(0, min(wait_ms, 30_000)), "request_cancel": request_cancel}
+    if after_revision is not None:
+        args["after_revision"] = after_revision
+    return _call(pid, "get_request_status", args, timeout_ms=max(30_000, min(wait_ms, 30_000) + 5000))
 
 
 @mcp.tool()
@@ -140,33 +148,43 @@ def execute_batch(pid: int, document_session: str, document_generation: int, ste
 @mcp.tool()
 def execute_and_verify(pid: int, document_session: str, document_generation: int, action: dict[str, Any],
                        element_ids: list[int], transaction_mode: str, preflights: list[str] | None = None,
+                       checks: list[dict[str, Any]] | None = None, result_ids_key: str = "element_ids",
+                       rollback_on_failure: bool = False, fields: list[str] | None = None,
                        timeout_ms: int = 60_000, request_id: str | None = None,
                        idempotency_key: str | None = None) -> dict[str, Any]:
-    """Execute an action and return bounded element projections plus warning delta."""
-    return _call(pid, "execute_and_verify", {"action": action, "element_ids": element_ids, "preflights": preflights or []},
+    """Execute once, regenerate, then optionally check exists/bounds/count/parameter assertions. Also inspect IDs from the result_ids_key array in the script result. checks=[] runs no assertions. rollback_on_failure requires auto/group. Parameter checks use stable parameter_id and expected raw value (internal units), with optional tolerance. Commit-time warnings live in receipt.details.notices. Legacy preflights must be empty."""
+    return _call(pid, "execute_and_verify", {"action": action, "element_ids": element_ids, "preflights": preflights or [],
+                 "checks": checks or [], "result_ids_key": result_ids_key, "rollback_on_failure": rollback_on_failure,
+                 **({"fields": fields} if fields is not None else {})},
                  document_session, document_generation, transaction_mode, timeout_ms, request_id, idempotency_key)
 
 
 @mcp.tool()
 def query_elements(pid: int, document_session: str, document_generation: int, category_id: int | None = None,
-                   limit: int = 100, timeout_ms: int = 30_000) -> dict[str, Any]:
-    """Return bounded RevitLookup-inspired projections for a category or the document."""
-    args: dict[str, Any] = {"limit": limit}
+                   limit: int = 100, timeout_ms: int = 30_000, include_types: bool = False,
+                   after_id: int | None = None, name_contains: str | None = None, type_id: int | None = None,
+                   level_id: int | None = None, fields: list[str] | None = None) -> dict[str, Any]:
+    """Query by category, name, type, or level with a stable element-ID cursor. Defaults to compact identity/relationships. include_types includes type elements. fields can request identity, instance_parameters, type_parameters, bounding_boxes, geometry, relationships, worksharing, phase, design_option, materials. Bounds and raw values use Revit internal units."""
+    args: dict[str, Any] = {"limit": limit, "include_types": include_types}
+    args.update({key: value for key, value in {"after_id": after_id, "name_contains": name_contains,
+                "type_id": type_id, "level_id": level_id, "fields": fields}.items() if value is not None})
     if category_id is not None:
         args["category_id"] = category_id
     return _call(pid, "query_elements", args, document_session, document_generation, "read", timeout_ms)
 
 
 @mcp.tool()
-def get_elements(pid: int, document_session: str, document_generation: int, element_ids: list[int], timeout_ms: int = 30_000) -> dict[str, Any]:
+def get_elements(pid: int, document_session: str, document_generation: int, element_ids: list[int], timeout_ms: int = 30_000,
+                 fields: list[str] | None = None) -> dict[str, Any]:
     """Get bounded identity, parameters, boxes, geometry summary, relationships, and worksharing data."""
-    return _call(pid, "get_elements", {"element_ids": element_ids}, document_session, document_generation, "read", timeout_ms)
+    return _call(pid, "get_elements", {"element_ids": element_ids, **({"fields": fields} if fields is not None else {})}, document_session, document_generation, "read", timeout_ms)
 
 
 @mcp.tool()
-def get_parameters(pid: int, document_session: str, document_generation: int, element_ids: list[int], timeout_ms: int = 30_000) -> dict[str, Any]:
+def get_parameters(pid: int, document_session: str, document_generation: int, element_ids: list[int], timeout_ms: int = 30_000,
+                   parameter_ids: list[int] | None = None) -> dict[str, Any]:
     """Get resolved instance parameters with storage type, units, raw values, and display values."""
-    return _call(pid, "get_parameters", {"element_ids": element_ids}, document_session, document_generation, "read", timeout_ms)
+    return _call(pid, "get_parameters", {"element_ids": element_ids, **({"parameter_ids": parameter_ids} if parameter_ids is not None else {})}, document_session, document_generation, "read", timeout_ms)
 
 
 @mcp.tool()
@@ -195,10 +213,37 @@ def open_view(pid: int, document_session: str, document_generation: int, view_id
 
 @mcp.tool()
 def export_view(pid: int, document_session: str, document_generation: int, view_id: int, output_directory: str,
-                file_name: str, timeout_ms: int = 60_000) -> dict[str, Any]:
-    """Export one view to PDF after model commit; file effects are not Revit-undoable."""
-    return _call(pid, "export_view", {"view_id": view_id, "output_directory": output_directory, "file_name": file_name},
+                file_name: str, timeout_ms: int = 60_000, format: str = "pdf",
+                view_ids: list[int] | None = None, pixel_size: int = 1600) -> dict[str, Any]:
+    """Export one or up to 24 view_ids to PNG or combined PDF. Returns actual created paths in a unique subfolder. No transaction; file effects are not Revit-undoable."""
+    return _call(pid, "export_view", {"view_id": view_id, "view_ids": view_ids or [], "output_directory": output_directory, "file_name": file_name,
+                                       "format": format, "pixel_size": pixel_size},
                  document_session, document_generation, "read", timeout_ms)
+
+
+@mcp.tool()
+def capture_model(pid: int, document_session: str, document_generation: int, preset: str = "building",
+                  element_ids: list[int] | None = None, level_ids: list[int] | None = None,
+                  output_directory: str | None = None, margin_m: float = 2.0, pixel_size: int = 1600,
+                  include_isolated: bool = True, cut_fraction: float = 0.5, axis: str = "long",
+                  inline_images: bool = True,
+                  timeout_ms: int = 120_000, request_id: str | None = None,
+                  idempotency_key: str | None = None) -> CallToolResult:
+    """Create reusable Revit inspection views and labelled PNG contact sheets, preserving the working view. Presets: building (NSEW orthographic elevations + four AXOs), elevations, axo, floors (level/host/intersection), element (section box with context, isolated components, horizontal/longitudinal middle cuts), horizontal, vertical. Explicit element_ids define framing; otherwise physical geometry and grids suggest a building. vertical axis is long/short. cut_fraction locates the cut. Runs without Python. Returns actual PNG paths and view IDs; inspect selected sheets once when visual evidence is useful. Helper views are model changes; files are not undoable."""
+    args: dict[str, Any] = {"preset": preset, "element_ids": element_ids or [], "level_ids": level_ids or [],
+                            "margin_m": margin_m, "pixel_size": pixel_size, "include_isolated": include_isolated,
+                            "cut_fraction": cut_fraction, "axis": axis}
+    if output_directory is not None:
+        args["output_directory"] = output_directory
+    response = _call(pid, "capture_model", args, document_session, document_generation, "manual",
+                     timeout_ms, request_id, idempotency_key)
+    content: list[Any] = [TextContent(type="text", text=json.dumps(response, ensure_ascii=False))]
+    if inline_images and response.get("state") == "succeeded":
+        for path in (response.get("result") or {}).get("contact_sheets", [])[:2]:
+            image_path = Path(path)
+            if image_path.suffix.lower() == ".png" and image_path.is_file() and image_path.stat().st_size <= 4 * 1024 * 1024:
+                content.append(ImageContent(type="image", data=base64.b64encode(image_path.read_bytes()).decode("ascii"), mime_type="image/png"))
+    return CallToolResult(content=content, structured_content=response, is_error=response.get("state") == "failed")
 
 
 @mcp.tool()

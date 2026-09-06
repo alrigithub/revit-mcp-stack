@@ -3,6 +3,10 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/RevitMcp.Bridge/CodeGate.cs" Link="Bridge/CodeGate.cs" />
+    <Compile Include="../../src/RevitMcp.Bridge/LocalSettings.cs" Link="Bridge/LocalSettings.cs" />
+    <Compile Include="../../src/RevitMcp.Bridge/ResultProjection.cs" Link="Bridge/ResultProjection.cs" />
+    <Compile Include="../../src/RevitMcp.Bridge/TransactionCoordinator.cs" Link="Bridge/TransactionCoordinator.cs" />
     <ProjectReference Include="../../src/RevitMcp.Core/RevitMcp.Core.csproj" />
     <ProjectReference Include="../../src/RevitMcp.Contracts/RevitMcp.Contracts.csproj" />
   </ItemGroup>

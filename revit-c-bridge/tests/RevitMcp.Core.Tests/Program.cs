@@ -5,9 +5,19 @@ using RevitMcp.Core;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("cooperative cancellation rolls back at checkpoint", ReceiptTests.CancellationRollsBackAtCheckpoint),
+    ("timing revisions preserve terminal receipt", ReceiptTests.TimingRevisionAndTerminalReceipt),
+    ("cooperative hooks do not leak into another request", ReceiptTests.CancellationScopeDoesNotLeak),
+    ("oversized auto and group results roll back before commit", HardeningTests.OversizedAutoRollsBack),
+    ("oversized aggregate batch rolls back all steps", HardeningTests.AggregateBatchRollsBack),
+    ("committed result has stable bounded projection", HardeningTests.CommittedProjectionIsStable),
+    ("rejected commit reports failure", HardeningTests.RejectedCommitFails),
+    ("saved tool gate respects disabled and invalid owners", HardeningTests.GateHonorsOwnership),
+    ("saved tool gate rejects invalid manifests", HardeningTests.GateValidatesManifest),
     ("frame handles partial reads", FramePartialReads),
     ("frame rejects oversize before allocation", FrameSizeLimit),
     ("ledger deduplicates request and idempotency IDs", LedgerDeduplication),
+    ("concurrent idempotency retries admit one request", ConcurrentDeduplication),
     ("ledger bounds retained terminal records", LedgerRetention),
     ("queue enforces capacity and terminal cancellation", QueueBounds),
     ("deadlines transition before execution", Deadline),
@@ -70,6 +80,17 @@ static Task LedgerRetention()
     ledger.Admit(Admission("d", null));
     True(ledger.Snapshot().Count <= 3); // two retained terminal records plus the live admission
     True(!ledger.TryGet("a", out _));
+    return Task.CompletedTask;
+}
+
+static Task ConcurrentDeduplication()
+{
+    var ledger = new RequestLedger();
+    var admissions = new System.Collections.Concurrent.ConcurrentBag<(RequestRecord Record, bool Created)>();
+    Parallel.For(0, 128, i => admissions.Add(ledger.Admit(Admission("retry-" + i, "same-mutation"))));
+    Equal(1, admissions.Count(item => item.Created));
+    Equal(1, admissions.Select(item => item.Record).Distinct().Count());
+    Equal(1, ledger.Snapshot().Count);
     return Task.CompletedTask;
 }
 

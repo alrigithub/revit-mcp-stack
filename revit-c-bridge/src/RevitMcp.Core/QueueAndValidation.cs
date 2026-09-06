@@ -13,6 +13,15 @@ public sealed class BoundedRequestQueue
     }
     public int Capacity { get; }
     public int Count { get { lock (_gate) return _queue.Count; } }
+    public int? Position(RequestRecord request)
+    {
+        lock (_gate)
+        {
+            var position = 0;
+            foreach (var queued in _queue) { position++; if (ReferenceEquals(queued, request)) return position; }
+            return null;
+        }
+    }
     public bool TryEnqueue(RequestRecord request)
     {
         lock (_gate)

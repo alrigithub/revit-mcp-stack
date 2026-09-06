@@ -56,7 +56,11 @@ public sealed class RoslynProviderHost : IDisposable
             }
         }
         try { return (string)(entry.Method.Invoke(null, [uiapp, document, uidoc, requestJson]) ?? "null"); }
-        catch (TargetInvocationException ex) { throw ex.InnerException ?? ex; }
+        catch (TargetInvocationException ex)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException ?? ex).Throw();
+            throw;
+        }
     }
 
     public void DiscardPrepared(string requestId)

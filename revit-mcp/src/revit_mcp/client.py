@@ -12,9 +12,13 @@ from .winpipe import PipeIoThread, PipeTransportError
 class BridgeClient:
     def __init__(self, transport: PipeIoThread | None = None) -> None:
         self.transport = transport or PipeIoThread()
+        # A separate lane keeps status/cancellation responsive during a long model call.
+        self.control_transport = transport or PipeIoThread()
 
     def close(self) -> None:
         self.transport.close()
+        if self.control_transport is not self.transport:
+            self.control_transport.close()
 
     def instances(self) -> list[dict[str, Any]]:
         return [item.__dict__ for item in list_instances(cleanup_stale=True)]
@@ -48,6 +52,12 @@ class BridgeClient:
             "arguments": arguments or {},
         }
         try:
-            return self.transport.request(instance.pipe_name, request, timeout_ms)
+            transport = self.control_transport if tool in {"get_request_status", "get_capabilities", "get_logs_tail"} else self.transport
+            return transport.request(instance.pipe_name, request, timeout_ms)
         except PipeTransportError as error:
-            return {"protocol_version": PROTOCOL_VERSION, "request_id": request_id, "state": "failed", "error": error.as_dict(), "omitted_fields": [], "deferred_fields": []}
+            details = error.as_dict()
+            details["remediation"] = (
+                "The execution outcome is unknown. Reconnect and query get_request_status with this request_id "
+                "before retrying a mutation; preserve its request_id/idempotency_key. " + details["remediation"]
+            )
+            return {"protocol_version": PROTOCOL_VERSION, "request_id": request_id, "state": "unknown", "error": details, "omitted_fields": [], "deferred_fields": []}

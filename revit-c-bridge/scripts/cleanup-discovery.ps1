@@ -1,8 +1,10 @@
 $root = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RevitMcp/instances'
-Get-ChildItem -LiteralPath $root -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object {
+foreach ($file in @(Get-ChildItem -LiteralPath $root -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+    $stale = $false
     try {
-        $record = Get-Content -Raw -LiteralPath $_.FullName | ConvertFrom-Json
+        $record = Get-Content -Raw -LiteralPath $file.FullName | ConvertFrom-Json
         $process = Get-Process -Id $record.pid -ErrorAction Stop
-        if ($process.StartTime.ToFileTimeUtc() -ne [long]$record.process_start_utc_ticks) { Remove-Item -LiteralPath $_.FullName -Force }
-    } catch { Remove-Item -LiteralPath $_.FullName -Force }
+        $stale = $process.StartTime.ToFileTimeUtc() -ne [long]$record.process_start_utc_ticks
+    } catch { $stale = $true }
+    if ($stale) { Remove-Item -LiteralPath $file.FullName -Force }
 }

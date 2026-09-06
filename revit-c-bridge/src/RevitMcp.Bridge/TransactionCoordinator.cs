@@ -5,8 +5,10 @@ namespace RevitMcp.Bridge;
 
 public sealed class TransactionCoordinator
 {
+    public Action<string>? ObserveOutcome { get; set; }
     public object Execute(Document document, string mode, string name, Func<object> action)
     {
+        ObserveOutcome?.Invoke(mode is "read" or "manual" ? "script_owned" : "not_started");
         return mode switch
         {
             "read" => ExecuteRead(document, action),
@@ -28,17 +30,19 @@ public sealed class TransactionCoordinator
             {
                 using var transaction = new Transaction(document, $"{name} {i + 1}");
                 if (transaction.Start() != TransactionStatus.Started) throw new RequestDispatchException("transaction_start_failed", "Revit rejected a batch step transaction.");
-                var result = steps[i]();
-                _ = JsonSerializer.SerializeToUtf8Bytes(result); // materialize before commit
+                var result = JsonSerializer.SerializeToElement(steps[i]());
                 if (transaction.Commit() != TransactionStatus.Committed) throw new RequestDispatchException("transaction_commit_failed", "A batch step did not commit.");
                 results.Add(result);
             }
+            var batchResult = ResultProjection.Materialize(new { atomic = true, undo_items_expected = 1, steps = results });
             if (group.Assimilate() != TransactionStatus.Committed) throw new RequestDispatchException("transaction_group_assimilate_failed", "The group did not create one undo item.");
-            return new { atomic = true, undo_items_expected = 1, steps = results };
+            ObserveOutcome?.Invoke("committed");
+            return batchResult;
         }
         catch
         {
             if (group.GetStatus() == TransactionStatus.Started) group.RollBack();
+            ObserveOutcome?.Invoke(group.GetStatus() == TransactionStatus.RolledBack ? "rolled_back" : "unknown");
             throw;
         }
     }
@@ -77,20 +81,25 @@ public sealed class TransactionCoordinator
         mode == "read"
             ? "Re-run with transaction_mode 'auto' (one bridge-owned transaction) or 'group'."
             : "Start and commit a Transaction inside the code, or re-run with transaction_mode 'auto'.");
-    private static object ExecuteAuto(Document document, string name, Func<object> action)
+    private object ExecuteAuto(Document document, string name, Func<object> action)
     {
         using var transaction = new Transaction(document, name);
         if (transaction.Start() != TransactionStatus.Started) throw new RequestDispatchException("transaction_start_failed", "Revit rejected the bridge-owned transaction.");
         try
         {
-            var result = action();
-            _ = JsonSerializer.SerializeToUtf8Bytes(result);
+            var result = ResultProjection.Materialize(action());
             if (transaction.Commit() != TransactionStatus.Committed) throw new RequestDispatchException("transaction_commit_failed", "The bridge-owned transaction did not commit.");
+            ObserveOutcome?.Invoke("committed");
             return result;
         }
-        catch { if (transaction.GetStatus() == TransactionStatus.Started) transaction.RollBack(); throw; }
+        catch
+        {
+            if (transaction.GetStatus() == TransactionStatus.Started) transaction.RollBack();
+            ObserveOutcome?.Invoke(transaction.GetStatus() == TransactionStatus.RolledBack ? "rolled_back" : "unknown");
+            throw;
+        }
     }
-    private static object ExecuteGroup(Document document, string name, Func<object> action)
+    private object ExecuteGroup(Document document, string name, Func<object> action)
     {
         using var group = new TransactionGroup(document, name);
         if (group.Start() != TransactionStatus.Started) throw new RequestDispatchException("transaction_group_start_failed", "Revit rejected the bridge-owned group.");
@@ -98,8 +107,14 @@ public sealed class TransactionCoordinator
         {
             var result = ExecuteAuto(document, name + " step", action);
             if (group.Assimilate() != TransactionStatus.Committed) throw new RequestDispatchException("transaction_group_assimilate_failed", "The group did not assimilate.");
+            ObserveOutcome?.Invoke("committed");
             return result;
         }
-        catch { if (group.GetStatus() == TransactionStatus.Started) group.RollBack(); throw; }
+        catch
+        {
+            if (group.GetStatus() == TransactionStatus.Started) group.RollBack();
+            ObserveOutcome?.Invoke(group.GetStatus() == TransactionStatus.RolledBack ? "rolled_back" : "unknown");
+            throw;
+        }
     }
 }

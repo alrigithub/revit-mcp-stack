@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-python -m unittest discover -s (Join-Path $root 'tests') -v
+. (Join-Path $root '../scripts/common.ps1')
+& (Get-BuildPython) -m unittest discover -s (Join-Path $root 'tests') -v
 exit $LASTEXITCODE
